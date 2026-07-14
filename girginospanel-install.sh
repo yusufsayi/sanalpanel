@@ -101,7 +101,7 @@ for t in "$A"/ops/*; do
   install -m 0755 "$t" "/usr/local/bin/$nm" 2>/dev/null
 done
 cp "$A/ops/"* /opt/girginospanel/src/scripts/ 2>/dev/null
-ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, repair, jail, wp-redis)"
+ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, ftp-setup, repair, jail, wp-redis)"
 
 # ============ 7) PANEL SSL (self-signed) ============
 step "7) Panel SSL (:8443 self-signed)"
@@ -200,9 +200,10 @@ fi
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
 
-# ============ 11) Valkey + optimize ============
-step "11) Valkey (Redis) + performans tuning"
+# ============ 11) Valkey + FTP + optimize ============
+step "11) Valkey (Redis) + Pure-FTPd + performans tuning"
 command -v girginospanel-redis-setup >/dev/null 2>&1 && girginospanel-redis-setup >/dev/null 2>&1 && ok "girginospanel-redis-setup" || warn "redis-setup atlandı"
+command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
 command -v girginospanel-optimize >/dev/null 2>&1 && girginospanel-optimize >/dev/null 2>&1 && ok "girginospanel-optimize" || warn "optimize atlandı"
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
@@ -233,8 +234,8 @@ step "15) Doğrulama"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/null)
 API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
-echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named girginospanel | tr '\n' ' ')"
-echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)"
+echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel | tr '\n' ' ')"
+echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
