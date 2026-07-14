@@ -1,0 +1,18 @@
+[Unit]
+Description=GirginOSPanel backend
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/girginospanel/env
+ExecStart=/opt/girginospanel/bin/girginospanel-server
+Restart=on-failure
+RestartSec=3
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=girginospanel
+
+[Install]
+WantedBy=multi-user.target
