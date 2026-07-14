@@ -198,12 +198,18 @@ else
 fi
 
 # ---- acme.sh (Let's Encrypt SSL) — panel /root/.acme.sh/acme.sh çağırır ----
+# LE geçerli email ister (@ + nokta). admin@local gibi geçersizse contact'sız kaydet.
+AEMAIL="$ADMIN_EPOSTA"; echo "$AEMAIL" | grep -qE '@[^@]+\.[^@]+$' || AEMAIL=""
 if [ ! -x /root/.acme.sh/acme.sh ]; then
-  curl -fsSL https://get.acme.sh 2>/dev/null | sh -s email="$ADMIN_EPOSTA" >/dev/null 2>&1 || true
+  if [ -n "$AEMAIL" ]; then curl -fsSL https://get.acme.sh 2>/dev/null | sh -s email="$AEMAIL" >/dev/null 2>&1 || true
+  else curl -fsSL https://get.acme.sh 2>/dev/null | sh >/dev/null 2>&1 || true; fi
 fi
 if [ -x /root/.acme.sh/acme.sh ]; then
   /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt >/dev/null 2>&1
-  ok "acme.sh (Let's Encrypt default CA + oto-yenileme cron)"
+  # LE hesabını ŞİMDİ kaydet (geçerli email varsa onunla, yoksa contact'sız) — issue anında hata olmasın
+  if [ -n "$AEMAIL" ]; then /root/.acme.sh/acme.sh --register-account -m "$AEMAIL" --server letsencrypt >/dev/null 2>&1
+  else /root/.acme.sh/acme.sh --register-account --server letsencrypt >/dev/null 2>&1; fi
+  ok "acme.sh (Let's Encrypt CA + hesap kayıtlı + oto-yenileme cron)"
 else
   warn "acme.sh kurulamadı — Let's Encrypt SSL için elle: curl https://get.acme.sh | sh"
 fi
@@ -243,17 +249,21 @@ ok "günlük yedek cron (03:00 UTC)"
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
 
-# ============ 11) Valkey + FTP + optimize ============
-step "11) Valkey (Redis) + Pure-FTPd + performans tuning"
+# ============ 11) Valkey + optimize ============
+step "11) Valkey (Redis) + performans tuning"
 command -v girginospanel-redis-setup >/dev/null 2>&1 && girginospanel-redis-setup >/dev/null 2>&1 && ok "girginospanel-redis-setup" || warn "redis-setup atlandı"
-command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
 command -v girginospanel-optimize >/dev/null 2>&1 && girginospanel-optimize >/dev/null 2>&1 && ok "girginospanel-optimize" || warn "optimize atlandı"
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
 step "12) Panel başlatılıyor"
 systemctl enable --now girginospanel >/dev/null 2>&1; sleep 3
-systemctl restart nginx >/dev/null 2>&1
+systemctl enable --now nginx >/dev/null 2>&1; systemctl restart nginx >/dev/null 2>&1
 if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; else journalctl -u girginospanel --no-pager -n 20; die "panel başlamadı"; fi
+
+# ---- FTP setup (Pure-FTPd) — ŞİMDİ çalışır: migration ftp_accounts tablosunu oluşturdu ----
+# (step 11'de değil çünkü GRANT SELECT ON panel.ftp_accounts tablo yokken patlıyordu)
+sleep 2
+command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
 
 # ============ 13) Yönetici erişimi ============
 # 🔴 Panel admin girişi = sunucunun ROOT kullanıcısı (PAM/shadow doğrulaması).

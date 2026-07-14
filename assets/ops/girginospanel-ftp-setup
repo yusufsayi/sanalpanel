@@ -27,10 +27,14 @@ else ok "pure-ftpd zaten kurulu"; fi
 # 2) read-only MySQL kullanıcısı (ftp_accounts SELECT)
 PFPW_FILE=/etc/pure-ftpd/.pfsql_pass
 if [ -s "$PFPW_FILE" ]; then PFPW=$(cat "$PFPW_FILE"); else PFPW=$(openssl rand -hex 20); fi
+# NOT: ftp_accounts tablosu migration'da oluşur; installer ftp-setup'ı panel
+# başladıktan SONRA çağırır. Yine de tablo yoksa GRANT panel.* ile devam et (patlamasın).
 mysql -e "CREATE USER IF NOT EXISTS 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';
-          ALTER USER 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';
-          GRANT SELECT ON panel.ftp_accounts TO 'pureftpd'@'localhost';
-          FLUSH PRIVILEGES;" 2>/dev/null && ok "MySQL kullanıcısı 'pureftpd' (SELECT ftp_accounts)" || die "MySQL kullanıcı oluşturulamadı"
+          ALTER USER 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';" 2>/dev/null || warn "pureftpd user"
+if ! mysql -e "GRANT SELECT ON panel.ftp_accounts TO 'pureftpd'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null; then
+  mysql -e "GRANT SELECT ON panel.* TO 'pureftpd'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null && warn "ftp_accounts tablosu yok — GRANT panel.* ile verildi"
+fi
+ok "MySQL kullanıcısı 'pureftpd' (SELECT ftp_accounts)"
 umask 077; echo "$PFPW" > "$PFPW_FILE"; chmod 600 "$PFPW_FILE"
 
 # 3) MySQL config (Pure-FTPd)
