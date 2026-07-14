@@ -1,0 +1,28 @@
+#!/bin/bash
+# girginospanel-backup-all - gunluk planli yedek (cron)
+ENV=/etc/girginospanel/env
+[ -f "$ENV" ] || exit 0
+DB_PASS=$(grep -oP 'PANEL_DB_DSN=panel:\K[^@]+' "$ENV" | head -1)
+[ -z "$DB_PASS" ] && exit 0
+
+find /var/backups/girginospanel -type f -name '*.tar.gz' -mtime +14 -delete 2>/dev/null
+
+mysql -h 127.0.0.1 -u panel -p"$DB_PASS" panel -N -e \
+  "SELECT id, alan_adi, sistem_kullanici FROM domains WHERE is_demo=0" 2>/dev/null | \
+while IFS=$'\t' read id alanAdi sk; do
+  [ -z "$sk" ] && continue
+  STAMP=$(date -u +%Y%m%d-%H%M%S)
+  DIR="/var/backups/girginospanel/$sk"
+  mkdir -p "$DIR"; chmod 700 "$DIR"
+  FILE="${sk}-${STAMP}-planli.tar.gz"
+  DB_NAME="${sk}_main"
+  mysqldump --single-transaction "$DB_NAME" > "$DIR/dump.sql" 2>/dev/null || echo "-- skipped" > "$DIR/dump.sql"
+  tar czf "$DIR/$FILE" -C /home "$sk" -C "$DIR" dump.sql 2>/dev/null
+  rm -f "$DIR/dump.sql"
+  if [ -f "$DIR/$FILE" ]; then
+    SIZE=$(stat -c %s "$DIR/$FILE")
+    mysql -h 127.0.0.1 -u panel -p"$DB_PASS" panel -e \
+      "INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar) VALUES($id, 'planli', '$FILE', $SIZE, 'gunluk cron')" 2>/dev/null
+    logger -t girginospanel-backup "OK $alanAdi -> $FILE ($SIZE B)"
+  fi
+done

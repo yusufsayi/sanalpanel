@@ -41,11 +41,11 @@ dnf config-manager --set-enabled crb >/dev/null 2>&1 && ok "CRB"
 
 # ============ 2) TEMEL PAKETLER ============
 step "2) Temel paketler"
-dnf install -y nginx mariadb-server valkey certbot python3-certbot-nginx \
-  clamav clamav-update httpd-tools tar openssl policycoreutils-python-utils \
+dnf install -y nginx httpd mariadb-server valkey certbot python3-certbot-nginx \
+  clamav clamav-update httpd-tools mod_proxy_html tar openssl policycoreutils-python-utils \
   setools-console jq bind bind-utils nftables unzip zip cronie xfsprogs sudo \
   rsync git curl >/dev/null 2>&1 \
-  && ok "nginx, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, araçlar" || die "temel paket kurulumu"
+  && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, araçlar" || die "temel paket kurulumu"
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
@@ -102,7 +102,7 @@ for t in "$A"/ops/*; do
   install -m 0755 "$t" "/usr/local/bin/$nm" 2>/dev/null
 done
 cp "$A/ops/"* /opt/girginospanel/src/scripts/ 2>/dev/null
-ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, ftp-setup, repair, jail, wp-redis)"
+ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
 
 # ============ 7) PANEL SSL (self-signed) ============
 step "7) Panel SSL (:8443 self-signed)"
@@ -208,6 +208,37 @@ else
   warn "acme.sh kurulamadı — Let's Encrypt SSL için elle: curl https://get.acme.sh | sh"
 fi
 
+# ---- httpd (Apache backend — web_backend=apache seçeneği, nginx ön-proxy) ----
+# nginx :80'de olduğu için Apache 127.0.0.1:10080'de dinler (mod_proxy_fcgi → php-fpm)
+if [ -f /etc/httpd/conf/httpd.conf ]; then
+  if grep -qE "^Listen 80$" /etc/httpd/conf/httpd.conf; then
+    sed -i "s/^Listen 80$/Listen 127.0.0.1:10080/" /etc/httpd/conf/httpd.conf
+  elif ! grep -qE "^Listen 127.0.0.1:10080" /etc/httpd/conf/httpd.conf; then
+    echo "Listen 127.0.0.1:10080" >> /etc/httpd/conf/httpd.conf
+  fi
+  semanage port -l 2>/dev/null | grep -qE "http_port_t.*\b10080\b" || \
+    semanage port -a -t http_port_t -p tcp 10080 2>/dev/null || \
+    semanage port -m -t http_port_t -p tcp 10080 2>/dev/null
+  if apachectl configtest >/dev/null 2>&1; then
+    systemctl enable --now httpd >/dev/null 2>&1 && ok "httpd (Apache backend :10080, mod_proxy_fcgi)" || warn "httpd başlatılamadı"
+  else warn "httpd configtest hata — Apache backend elle kontrol"; fi
+fi
+
+# ---- composer (per-domain PHP bağımlılık yönetimi) ----
+if [ ! -x /usr/local/bin/composer ]; then
+  curl -sS https://getcomposer.org/installer 2>/dev/null | php -- --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+fi
+[ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer kurulamadı"
+
+# ---- günlük yedek cron (girginospanel-backup-all 03:00 UTC) ----
+cat > /etc/cron.d/girginospanel-backup <<'CRON'
+# girginospanel — günlük planlı yedek 03:00 UTC
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 3 * * * root /usr/local/bin/girginospanel-backup-all
+CRON
+ok "günlük yedek cron (03:00 UTC)"
+
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
@@ -248,7 +279,7 @@ CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/nu
 API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
 echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel | tr '\n' ' ')"
 echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
-echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)"
+echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)   ·   composer $(command -v composer >/dev/null && echo ✓ || echo ✗)   ·   apache/httpd $(systemctl is-active httpd)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
