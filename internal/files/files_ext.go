@@ -156,7 +156,7 @@ type chmodReq struct {
 }
 
 func (h *Handlers) Chmod(w http.ResponseWriter, r *http.Request) {
-	home, _, err := h.home(r)
+	home, sk, err := h.home(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -181,6 +181,7 @@ func (h *Handlers) Chmod(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "chmod: "+err.Error())
 		return
 	}
+	chown(abs, sk) // sahiplik domain user'ında kalsın + SELinux context'i düzelt
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "yol": req.Yol, "mod": req.Mod})
 }
 
