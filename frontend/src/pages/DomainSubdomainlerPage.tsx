@@ -40,6 +40,16 @@ export default function DomainSubdomainlerPage() {
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }
   }
 
+  const [sslMesgul, setSslMesgul] = useState<number | null>(null)
+  async function sslKur(s: Sub, tip: 'letsencrypt' | 'self-signed') {
+    setHata(null); setOk(null); setSslMesgul(s.id)
+    try {
+      await api.post(`/domains/${id}/subdomain/${s.id}/ssl`, { tip })
+      setOk(`${s.tam_ad} için SSL kuruldu (${tip === 'letsencrypt' ? "Let's Encrypt" : 'öz-imzalı'}). Artık https:// ile erişilebilir.`)
+    } catch (err) { setHata(apiHata(err, 'SSL kurulamadı')) }
+    finally { setSslMesgul(null) }
+  }
+
   return (
     <div className="px-6 py-5">
       <Breadcrumb items={[
@@ -87,7 +97,17 @@ export default function DomainSubdomainlerPage() {
                     <a href={`http://${s.tam_ad}`} target="_blank" rel="noreferrer" className="font-mono text-sm text-brand-600 dark:text-brand-400 hover:underline">{s.tam_ad}</a>
                     <div className="text-[11px] text-slate-400 font-mono truncate">{s.docroot} · PHP {s.php_surum}</div>
                   </div>
-                  <button onClick={() => sil(s)} className="shrink-0 text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">Sil</button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => sslKur(s, 'letsencrypt')} disabled={sslMesgul === s.id} title="Let's Encrypt SSL kur"
+                      className="text-xs px-2.5 py-1 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-50">
+                      {sslMesgul === s.id ? '…' : "🔒 Let's Encrypt"}
+                    </button>
+                    <button onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title="Öz-imzalı SSL kur"
+                      className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 text-slate-500 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
+                      öz-imza
+                    </button>
+                    <button onClick={() => sil(s)} className="text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">Sil</button>
+                  </div>
                 </li>
               ))}
             </ul>
