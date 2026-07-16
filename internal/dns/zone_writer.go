@@ -32,21 +32,51 @@ func fqdn(tip, deger string) string {
 }
 
 var zoneTmpl = template.Must(template.New("z").Funcs(template.FuncMap{
-	"fqdn": fqdn,
-}).Parse(`$TTL 3600
-@   IN  SOA ns1.{{.AlanAdi}}. admin.{{.AlanAdi}}. (
+	"fqdn":    fqdn,
+	"soaHost": soaHost,
+	"soaMail": soaMail,
+}).Parse(`$TTL {{.SOA.TTL}}
+@   IN  SOA {{soaHost .SOA.PrimaryNS}} {{soaMail .SOA.Hostmaster}} (
     {{.Serial}}  ; serial
-    3600         ; refresh
-    900          ; retry
-    1209600      ; expire
-    3600         ; minimum
+    {{.SOA.Refresh}}  ; refresh
+    {{.SOA.Retry}}  ; retry
+    {{.SOA.Expire}}  ; expire
+    {{.SOA.Minimum}}  ; minimum
 )
 {{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if and .Oncelik (or (eq .Tip "MX") (eq .Tip "SRV"))}}{{.Oncelik}} {{end}}{{fqdn .Tip .Deger}}
 {{end}}`))
 
+// soaHost: primary NS'e trailing nokta ekle (BIND relative yorumlamasın).
+func soaHost(ns string) string {
+	ns = strings.TrimSpace(ns)
+	if ns == "" {
+		return "."
+	}
+	if !strings.HasSuffix(ns, ".") {
+		ns += "."
+	}
+	return ns
+}
+
+// soaMail: hostmaster e-postasını zone formatına çevir (admin@x.com -> admin.x.com.).
+func soaMail(hm string) string {
+	hm = strings.TrimSpace(hm)
+	if i := strings.Index(hm, "@"); i >= 0 {
+		hm = hm[:i] + "." + hm[i+1:]
+	}
+	if hm == "" {
+		return "."
+	}
+	if !strings.HasSuffix(hm, ".") {
+		hm += "."
+	}
+	return hm
+}
+
 type zoneCtx struct {
 	AlanAdi  string
 	Serial   string
+	SOA      SOA
 	Kayitlar []Kayit
 }
 
@@ -79,8 +109,9 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	// bu durumda named.run.log uyarı verir ama prod'da nadir.
 	serial := time.Now().UTC().Format("2006010215")
 
+	soa := LoadSOA(ctx, db, domainID, alanAdi)
 	var buf bytes.Buffer
-	if err := zoneTmpl.Execute(&buf, zoneCtx{AlanAdi: alanAdi, Serial: serial, Kayitlar: kayitlar}); err != nil {
+	if err := zoneTmpl.Execute(&buf, zoneCtx{AlanAdi: alanAdi, Serial: serial, SOA: soa, Kayitlar: kayitlar}); err != nil {
 		return err
 	}
 

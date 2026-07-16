@@ -51,6 +51,9 @@ export default function DomainDNSPage() {
   const [silinecek, setSilinecek] = useState<Kayit | null>(null)
   const [secili, setSecili] = useState<Set<number>>(new Set())
   const [topluSilOnay, setTopluSilOnay] = useState(false)
+  const [soa, setSoa] = useState<{ primary_ns: string; hostmaster: string; refresh: number; retry: number; expire: number; minimum: number; ttl: number } | null>(null)
+  const [soaAcik, setSoaAcik] = useState(false)
+  const [soaKaydediyor, setSoaKaydediyor] = useState(false)
 
   function yukle() {
     if (!id) return
@@ -91,9 +94,24 @@ export default function DomainDNSPage() {
     } catch (e) { setHata(apiHata(e, 'Toplu güncelleme başarısız')) }
   }
   useEffect(() => {
-    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    if (id) {
+      api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+      api.get<typeof soa>(`/domains/${id}/dns/soa`).then(r => setSoa(r.data)).catch(() => {})
+    }
     yukle()
   }, [id])
+
+  async function soaKaydet(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || !soa) return
+    setHata(null); setBasari(null); setSoaKaydediyor(true)
+    try {
+      const { data } = await api.put(`/domains/${id}/dns/soa`, soa)
+      setSoa(data)
+      setBasari('SOA ayarları kaydedildi ve zone yeniden yazıldı.')
+    } catch (e) { setHata(apiHata(e, 'SOA kaydedilemedi')) }
+    finally { setSoaKaydediyor(false) }
+  }
 
   async function sablonUygula() {
     if (!id) return
@@ -134,10 +152,44 @@ export default function DomainDNSPage() {
         </p>
       )}
 
-      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2 text-xs text-amber-800 dark:text-amber-200 mb-4">
-        <strong>Bilgi:</strong> Bu sunucu authoritative DNS değil. Kayıtlar şablon olarak tutulur — DNS sağlayıcınızda (Cloudflare, ns-records vb.) bu kayıtları manuel girmeniz gerekir.
-        İleride BIND/PowerDNS entegrasyonu (F11.5) ile otomatik servis edilecek.
+      <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 rounded-md px-3 py-2 text-xs text-sky-800 dark:text-sky-200 mb-4">
+        <strong>Bilgi:</strong> Bu sunucu <strong>authoritative DNS</strong>'tir (BIND) — kayıtlar kaydedildiği anda yayınlanır. Domainin çalışması için alan adı operatöründe NS kayıtlarını bu sunucunun <span className="font-mono">ns1.{domain?.alan_adi || 'alaniniz'}</span> / <span className="font-mono">ns2.{domain?.alan_adi || 'alaniniz'}</span> adreslerine yönlendirin.
       </div>
+
+      {soa && (
+        <div className="border border-slate-200 dark:border-slate-800 rounded-xl mb-4 overflow-hidden">
+          <button onClick={() => setSoaAcik(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+            <span>⚙️ SOA Ayarları <span className="text-xs text-slate-400 font-normal">(başlangıç yetki kaydı — refresh/retry/expire/NS)</span></span>
+            <span className="text-slate-400 text-xs">{soaAcik ? '▲ gizle' : '▼ düzenle'}</span>
+          </button>
+          {soaAcik && (
+            <form onSubmit={soaKaydet} className="px-4 pb-4 pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-slate-100 dark:border-slate-800">
+              <label className="col-span-2">
+                <span className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Birincil NS</span>
+                <input value={soa.primary_ns} onChange={e => setSoa({ ...soa, primary_ns: e.target.value })}
+                  className="mt-1 w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm font-mono outline-none focus:border-brand-500" />
+              </label>
+              <label className="col-span-2">
+                <span className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Hostmaster (e-posta)</span>
+                <input value={soa.hostmaster} onChange={e => setSoa({ ...soa, hostmaster: e.target.value })} placeholder="admin@alan.com"
+                  className="mt-1 w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm font-mono outline-none focus:border-brand-500" />
+              </label>
+              {(['refresh', 'retry', 'expire', 'minimum', 'ttl'] as const).map(f => (
+                <label key={f}>
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">{f} (sn)</span>
+                  <input type="number" min={0} value={soa[f]} onChange={e => setSoa({ ...soa, [f]: parseInt(e.target.value) || 0 })}
+                    className="mt-1 w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm font-mono outline-none focus:border-brand-500" />
+                </label>
+              ))}
+              <div className="col-span-2 md:col-span-4 flex justify-end">
+                <button disabled={soaKaydediyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-md disabled:opacity-50">
+                  {soaKaydediyor ? 'Kaydediliyor…' : 'SOA Kaydet'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-4">
         <button
