@@ -67,7 +67,12 @@ NEWBIN="$A/girginospanel-server"
 head -c4 "$NEWBIN" | grep -q $'\x7fELF' || die "indirilen binary geçerli ELF değil — iptal"
 CURVER=$(surum); [ -n "$CURVER" ] || CURVER="?"
 echo "  mevcut sürüm: $CURVER"
-RELHASH=$( { sha256sum "$NEWBIN"; [ -f "$A/frontend-dist.tar.gz" ] && sha256sum "$A/frontend-dist.tar.gz"; [ -f "$A/migrations.tar.gz" ] && sha256sum "$A/migrations.tar.gz"; } | sha256sum | cut -d' ' -f1)
+# NOT: her sha256sum'u cut ile SADECE hash'e indir — aksi halde çıktıdaki (rastgele
+# tmp) dosya yolu RELHASH'i her çalıştırmada değiştirir ve no-op asla çalışmazdı.
+RELHASH=$( { sha256sum "$NEWBIN" | cut -d' ' -f1
+  [ -f "$A/frontend-dist.tar.gz" ] && sha256sum "$A/frontend-dist.tar.gz" | cut -d' ' -f1
+  [ -f "$A/migrations.tar.gz" ] && sha256sum "$A/migrations.tar.gz" | cut -d' ' -f1
+  true; } | sha256sum | cut -d' ' -f1)
 MARKER="$PREFIX/.release_hash"
 CURREL=$(cat "$MARKER" 2>/dev/null || echo yok)
 if [ "$RELHASH" = "$CURREL" ] && [ "$FORCE" = 0 ]; then
