@@ -186,11 +186,15 @@ gzip_comp_level 5;
 gzip_min_length 256;
 gzip_proxied any;
 gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml application/xml+rss application/rss+xml application/atom+xml application/wasm application/vnd.ms-fontobject application/x-font-ttf font/ttf font/otf font/woff font/woff2 image/svg+xml image/x-icon;
-# statik dosya deskriptör cache — açık dosya sayısını azaltır, I/O düşürür
+# statik dosya deskriptör cache — açık dosya sayısını azaltır, I/O düşürür.
+# DİKKAT (hosting paneli): errors=off ŞART — aksi halde bir domain/dosya HAZIR
+# olmadan gelen istek "yok" sonucunu cache'ler ve dosya sonradan oluşsa bile
+# stale 404/500 döner (valid süresince). errors=off + kısa valid = yeni oluşan
+# domain/dosya anında servis edilir. valid 30s: dosya değişiklikleri hızlı yansır.
 open_file_cache max=10000 inactive=60s;
-open_file_cache_valid 120s;
+open_file_cache_valid 30s;
 open_file_cache_min_uses 2;
-open_file_cache_errors on;
+open_file_cache_errors off;
 NGX
 
 # 3) doğrula → başarısızsa geri al
