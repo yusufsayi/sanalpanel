@@ -308,46 +308,79 @@ func (h *Handlers) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "eklenen": n})
 }
 
-// SeedDefaults: domain icin standart DNS sablonu (idempotent)
+// SeedDefaults: domain icin MERKEZI DNS sablonundan kayit uretir (idempotent).
+// Sablon Ayarlar'da duzenlenebilir; DMARC/SPF/DKIM dahil placeholder'lar cozulur.
+// DKIM icin domain'e ozel anahtar cifti uretilir (varsa yeniden kullanilir).
 func SeedDefaults(ctx context.Context, db *sql.DB, domainID int64, alanAdi, ipv4 string) (int, error) {
 	if ipv4 == "" {
 		ipv4 = "127.0.0.1"
 	}
-	tmpl := []struct {
-		Ad, Tip, Deger string
-		TTL, Oncelik   int
-	}{
-		{"@", "A", ipv4, 3600, 0},
-		{"www", "A", ipv4, 3600, 0},
-		{"@", "MX", "mail." + alanAdi, 3600, 10},
-		{"mail", "A", ipv4, 3600, 0},
-		{"@", "TXT", "v=spf1 mx ip4:" + ipv4 + " ~all", 3600, 0},
-		{"ns1", "A", ipv4, 3600, 0},
-		{"ns2", "A", ipv4, 3600, 0},
-		{"@", "NS", "ns1." + alanAdi, 86400, 0},
-		{"@", "NS", "ns2." + alanAdi, 86400, 0},
+	rows, err := LoadTemplate(ctx, db)
+	if err != nil || len(rows) == 0 {
+		rows = builtinDefaults() // tablo bos/erisilemezse gomulu varsayilan
 	}
+	meta := LoadTemplateMeta(ctx, db)
+	selector := meta.DKIMSelector
+
+	// DKIM gerekiyorsa anahtari hazirla (bir kez)
+	dkimTxt := ""
+	if meta.DKIMAktif {
+		for _, t := range rows {
+			if t.Aktif && strings.Contains(t.Deger, "{DKIM}") {
+				dkimTxt, _ = EnsureDKIM(ctx, db, domainID, alanAdi, selector)
+				break
+			}
+		}
+	}
+
 	added := 0
-	for _, t := range tmpl {
-		// Aynısı zaten varsa atla
+	for _, t := range rows {
+		if !t.Aktif {
+			continue
+		}
+		// DKIM satiri ama anahtar uretilemedi/kapali → atla
+		if strings.Contains(t.Deger, "{DKIM}") && (!meta.DKIMAktif || dkimTxt == "") {
+			continue
+		}
+		ad := subst(t.Ad, alanAdi, ipv4, selector, dkimTxt)
+		deger := subst(t.Deger, alanAdi, ipv4, selector, dkimTxt)
+		tip := strings.ToUpper(strings.TrimSpace(t.Tip))
+		// Ayni ad+tip+deger varsa atla (idempotent)
 		var n int
 		_ = db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM dns_records WHERE domain_id=? AND ad=? AND tip=? AND deger=?`,
-			domainID, t.Ad, t.Tip, t.Deger).Scan(&n)
+			domainID, ad, tip, deger).Scan(&n)
 		if n > 0 {
 			continue
 		}
-		_, err := db.ExecContext(ctx,
+		if _, err := db.ExecContext(ctx,
 			`INSERT INTO dns_records(domain_id, ad, tip, deger, ttl, oncelik, aktif)
 			 VALUES(?,?,?,?,?,?, 1)`,
-			domainID, t.Ad, t.Tip, t.Deger, t.TTL, t.Oncelik)
-		if err != nil {
-			log.Printf("dns seed %s/%s: %v", t.Ad, t.Tip, err)
+			domainID, ad, tip, deger, t.TTL, oncelikNormalize(tip, t.Oncelik)); err != nil {
+			log.Printf("dns seed %s/%s: %v", ad, tip, err)
 			continue
 		}
 		added++
 	}
+
+	// Per-domain SOA yoksa merkezi sablon SOA parametrelerinden tohumla
+	seedSOAFromMeta(ctx, db, domainID, alanAdi, meta)
 	return added, nil
+}
+
+// seedSOAFromMeta: domain'in dns_soa satiri yoksa merkezi sablon SOA degerleriyle olustur.
+func seedSOAFromMeta(ctx context.Context, db *sql.DB, domainID int64, alanAdi string, meta TemplateMeta) {
+	var mevcut int
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_soa WHERE domain_id=?`, domainID).Scan(&mevcut)
+	if mevcut > 0 {
+		return
+	}
+	d := defaultSOA(alanAdi)
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
+		 VALUES(?,?,?,?,?,?,?,?)
+		 ON DUPLICATE KEY UPDATE domain_id=domain_id`,
+		domainID, d.PrimaryNS, d.Hostmaster, meta.SOARefresh, meta.SOARetry, meta.SOAExpire, meta.SOAMinimum, meta.SOATTL)
 }
 
 func gecerliTip(t string) bool {

@@ -33,6 +33,7 @@ func fqdn(tip, deger string) string {
 
 var zoneTmpl = template.Must(template.New("z").Funcs(template.FuncMap{
 	"fqdn":    fqdn,
+	"rdata":   rdata,
 	"soaHost": soaHost,
 	"soaMail": soaMail,
 }).Parse(`$TTL {{.SOA.TTL}}
@@ -43,8 +44,40 @@ var zoneTmpl = template.Must(template.New("z").Funcs(template.FuncMap{
     {{.SOA.Expire}}  ; expire
     {{.SOA.Minimum}}  ; minimum
 )
-{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if and .Oncelik (or (eq .Tip "MX") (eq .Tip "SRV"))}}{{.Oncelik}} {{end}}{{fqdn .Tip .Deger}}
+{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if and .Oncelik (or (eq .Tip "MX") (eq .Tip "SRV"))}}{{.Oncelik}} {{end}}{{rdata .Tip .Deger}}
 {{end}}`))
+
+// rdata: kayit tipine gore zone rdata uretir. TXT icin tirnak/parcalama (255+ ise),
+// digerleri icin fqdn (NS/MX/CNAME/SRV/PTR trailing nokta) uygular.
+// TXT tirnaklanmazsa named-checkzone bosluklu SPF/DMARC/DKIM'i coklu char-string olarak
+// yorumlar veya reddedebilir; DKIM 2048-bit anahtar 255 karakteri asar → parcalanmali.
+func rdata(tip, deger string) string {
+	if strings.ToUpper(strings.TrimSpace(tip)) == "TXT" {
+		return txtQuote(deger)
+	}
+	return fqdn(tip, deger)
+}
+
+// txtQuote: TXT degerini gecerli zone formatina cevirir.
+// Zaten tirnakli ise oldugu gibi birakir; degilse 255 karakterlik parcalara bolup
+// her parcayi tirnaklar (BIND bitisik tirnakli stringleri birlestirir).
+func txtQuote(s string) string {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "\"") {
+		return t
+	}
+	t = strings.ReplaceAll(t, "\"", "")
+	if len(t) <= 255 {
+		return "\"" + t + "\""
+	}
+	var b strings.Builder
+	for len(t) > 255 {
+		b.WriteString("\"" + t[:255] + "\" ")
+		t = t[255:]
+	}
+	b.WriteString("\"" + t + "\"")
+	return b.String()
+}
 
 // soaHost: primary NS'e trailing nokta ekle (BIND relative yorumlamasın).
 func soaHost(ns string) string {

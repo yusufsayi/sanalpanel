@@ -99,9 +99,8 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	}()
 	go func() {
 		defer wg.Done()
-		if b, e := wpStdout(ctx, sk, "maintenance-mode", "status", "--path="+dir); e == nil {
-			out["bakim"] = strings.Contains(string(b), "is active")
-		}
+		// KALICI bakım modu: WP-native 10dk auto-expiry yerine mu-plugin bayrağını oku.
+		out["bakim"] = bakimAktif(dir)
 	}()
 	wg.Wait()
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -333,9 +332,16 @@ func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch req.Islem {
 	case "bakim-ac":
-		out, err = wpKomut(sk, "maintenance-mode", "activate", "--path="+dir)
+		// KALICI bakım modu (mu-plugin) — WP'nin 10dk auto-expiry'sini bypass eder.
+		if err = bakimAc(sk, dir); err == nil {
+			h.bakimKaydet(r, dir, true)
+			out = []byte("Bakım modu açıldı (kalıcı).")
+		}
 	case "bakim-kapat":
-		out, err = wpKomut(sk, "maintenance-mode", "deactivate", "--path="+dir)
+		if err = bakimKapat(dir); err == nil {
+			h.bakimKaydet(r, dir, false)
+			out = []byte("Bakım modu kapatıldı.")
+		}
 	case "cache-temizle":
 		out, err = wpKomut(sk, "cache", "flush", "--path="+dir)
 	case "tumunu-guncelle":
@@ -359,6 +365,22 @@ func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "cikti": kisalt(string(out))})
+}
+
+// bakimKaydet: bakım modu durumunu wp_bakim tablosuna yazar (kalıcı takip).
+// Böylece durum DB'de tutulur; ileride reconcile/render bunu referans alabilir.
+func (h *Handlers) bakimKaydet(r *http.Request, dir string, aktif bool) {
+	id, _, _, _, _, ok := h.domain(r)
+	if !ok {
+		return
+	}
+	ak := 0
+	if aktif {
+		ak = 1
+	}
+	_, _ = h.DB.ExecContext(r.Context(),
+		`INSERT INTO wp_bakim(domain_id, dizin, aktif) VALUES(?,?,?)
+		 ON DUPLICATE KEY UPDATE aktif=VALUES(aktif)`, id, dir, ak)
 }
 
 // kisalt: uzun wp-cli çıktısını son 600 karaktere kırpar (hata mesajı için yeterli).

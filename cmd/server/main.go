@@ -44,6 +44,7 @@ import (
 	"girginospanel/internal/phpsurum"
 	"girginospanel/internal/plans"
 	"girginospanel/internal/pma"
+	"girginospanel/internal/provisioner"
 	"girginospanel/internal/sifrekoruma"
 	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
@@ -72,6 +73,8 @@ func main() {
 	// migrations
 	runMigrations(d)
 
+	provisioner.Init(d) // askıya-alma tutarlılığı için provisioner'a DB handle'ı ver
+
 	ipv4 := detectIPv4()
 	log.Printf("server ipv4: %s", ipv4)
 
@@ -80,6 +83,9 @@ func main() {
 	}
 	if err := plans.SeedIfEmpty(context.Background(), d); err != nil {
 		log.Printf("plans seed warn: %v", err)
+	}
+	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
+		log.Printf("dns template seed warn: %v", err)
 	}
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
@@ -268,6 +274,17 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/toplu-durum", dnsH.TopluDurum)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/soa", dnsH.GetSOA)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/soa", dnsH.PutSOA)
+				// Merkezi DNS şablonu (admin) — domain eklerken + "Şablonu Uygula" bunu okur
+				r.With(middleware.AdminOnly).Get("/dns-template", dnsH.GetTemplate)
+				r.With(middleware.AdminOnly).Put("/dns-template", dnsH.PutTemplate)
+				// Domain askıya al / geri al (suspend)
+				r.With(middleware.AdminOnly).Post("/domains/{id}/askiya-al", domainsH.AskiyaAl)
+				r.With(middleware.AdminOnly).Post("/domains/{id}/askidan-al", domainsH.AskidanAl)
+				// Aylık trafik toplayıcıyı elle tetikle (test/anlık güncelleme)
+				r.With(middleware.AdminOnly).Post("/admin/trafik/tick", func(w http.ResponseWriter, req *http.Request) {
+					n := istatistik.AggregateAll(d)
+					httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "islenen_domain": n})
+				})
 				r.With(middleware.AdminOnly).Get("/customers", accountsH.ListCustomers)
 				r.With(middleware.AdminOnly).Post("/customers", accountsH.CreateCustomer)
 				r.With(middleware.AdminOnly).Put("/customers/{id}", accountsH.UpdateCustomer)
@@ -332,7 +349,8 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	monitor.StartYukSampler(d, 60*time.Second) // dashboard yük geçmişi örnekleyici
+	monitor.StartYukSampler(d, 60*time.Second)          // dashboard yük geçmişi örnekleyici
+	istatistik.StartTrafikAggregator(d, 5*time.Minute)  // per-domain aylık trafik toplayıcı
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
 	}

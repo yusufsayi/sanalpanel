@@ -20,6 +20,15 @@ var (
 	slugSan   = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
+// pkgDB: askıya-alma durumunu HER vhost render'ında kontrol edebilmek için
+// paket düzeyinde tutulan DB handle'ı (main.go'da Init ile set edilir).
+// Böylece SetPHP/SSL/backend gibi doğrudan renderAndReload çağıran yollar da
+// askıdaki bir domain'i sessizce yeniden yayına almaz.
+var pkgDB *sql.DB
+
+// Init: paket DB handle'ını ayarlar (askıya-alma tutarlılığı için).
+func Init(d *sql.DB) { pkgDB = d }
+
 type phpAyar struct {
 	PoolDir string
 	SockDir string
@@ -251,6 +260,60 @@ server {
 {{- end -}}
 `))
 
+// suspendedVhostTmpl — "Hesabı Askıya Al" için: acme-challenge hariç TÜM istekler 503.
+// SSL sertifikası varsa 443'te de servis edilir (böylece askıdayken bile cert yenilenebilir).
+var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} — GirginOSPanel tarafından ASKIYA ALINDI
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/_acme;
+        auth_basic off;
+        try_files $uri =404;
+    }
+
+    access_log /var/log/nginx/{{.AlanAdi}}.access.log;
+    error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
+
+    location / {
+        return 503;
+    }
+    error_page 503 /_askida.html;
+    location = /_askida.html {
+        internal;
+        default_type text/html;
+        return 503 '<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Hesap Askıya Alındı</title><style>body{font-family:system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.k{max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center}.l{width:48px;height:48px;background:#ea580c;border-radius:10px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px}h1{font-size:22px;color:#0f172a;margin:0 0 8px}p{color:#64748b;line-height:1.6}</style></head><body><div class="k"><div class="l">!</div><h1>Hesap Askıya Alındı</h1><p>Bu web sitesi geçici olarak askıya alınmıştır. Lütfen hizmet sağlayıcınız ile iletişime geçin.</p></div></body></html>';
+    }
+}
+{{if .SSL}}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+
+    ssl_certificate     {{.CertPath}};
+    ssl_certificate_key {{.KeyPath}};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    access_log /var/log/nginx/{{.AlanAdi}}.access.log;
+    error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
+
+    location / {
+        return 503;
+    }
+    error_page 503 /_askida.html;
+    location = /_askida.html {
+        internal;
+        default_type text/html;
+        return 503 '<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Hesap Askıya Alındı</title><style>body{font-family:system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.k{max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center}.l{width:48px;height:48px;background:#ea580c;border-radius:10px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px}h1{font-size:22px;color:#0f172a;margin:0 0 8px}p{color:#64748b;line-height:1.6}</style></head><body><div class="k"><div class="l">!</div><h1>Hesap Askıya Alındı</h1><p>Bu web sitesi geçici olarak askıya alınmıştır. Lütfen hizmet sağlayıcınız ile iletişime geçin.</p></div></body></html>';
+    }
+}
+{{end}}`))
+
 var phpPoolTmpl = template.Must(template.New("p").Parse(`[{{.User}}]
 user = {{.User}}
 group = {{.User}}
@@ -301,6 +364,9 @@ type VhostOpts struct {
 
 	// Web sunucu backend: "php-fpm" (default) | "apache" | "static"
 	Backend string
+
+	// Askida true ise normal vhost yerine 503 "askıya alındı" vhost'u render edilir.
+	Askida bool
 }
 
 func (o VhostOpts) SSL() bool {
@@ -332,8 +398,23 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		opts.Backend = "php-fpm"
 	}
 
+	// Askıya-alma tutarlılığı: opts açıkça askıda demese bile DB'de bu kullanıcının
+	// domaini askıdaysa, HER render'ı 503 vhost'u olarak zorla. Bu sayede SetPHP/SSL/
+	// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
+	if !opts.Askida && pkgDB != nil {
+		var ak int
+		_ = pkgDB.QueryRow(`SELECT COALESCE(askida,0) FROM domains WHERE sistem_kullanici=?`, sk).Scan(&ak)
+		if ak == 1 {
+			opts.Askida = true
+		}
+	}
+
 	var buf bytes.Buffer
-	if err := vhostTmpl.Execute(&buf, opts); err != nil {
+	tmpl := vhostTmpl
+	if opts.Askida {
+		tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
+	}
+	if err := tmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("template render: %w", err)
 	}
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
@@ -348,7 +429,8 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	}
 
 	// Apache backend yönetimi (idempotent — yoksa yaz, varsa sil)
-	if opts.Backend == "apache" {
+	// Askıdayken tüm istekler nginx'te 503 döner; Apache vhost'unu temizle.
+	if opts.Backend == "apache" && !opts.Askida {
 		if err := writeApacheVhost(opts, sk); err != nil {
 			return err
 		}
@@ -679,10 +761,11 @@ func welcomeHTML(domain string) string {
 // PHP versiyonu/socket degisikliklerinden sonra cagrilir; SSL bilgilerini DB'den okur.
 func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error {
 	var alanAdi, sk, certPath, keyPath, sslKaynak, backend string
+	var askida int
 	if err := db.QueryRow(
-		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm')
+		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm'), COALESCE(askida,0)
 		 FROM domains WHERE id=?`, domainID).
-		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend); err != nil {
+		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida); err != nil {
 		return fmt.Errorf("domain bilgi cek: %w", err)
 	}
 	home := "/home/" + sk
@@ -697,6 +780,7 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 		KeyPath:         keyPath,
 		SSLKaynak:       sslKaynak,
 		Backend:         backend,
+		Askida:          askida == 1, // askıdaysa her render'da 503 vhost'u tekrar uygulanır
 		HdrXContentType: true, HdrXXSS: true, HdrReferrer: true,
 		HdrPermissions: true, HdrCSPUpgrade: true, HdrHSTS: true,
 		HSTSMaxAge: 31536000, HSTSSubdomains: true, HSTSPreload: false,
@@ -741,6 +825,21 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 		opts.EkDirektifler += pb
 	}
 	return renderAndReload(opts, sk)
+}
+
+// RerenderVhost: domainID için socket'i çözerek vhost'u yeniden render eder.
+// Askıya al / askıdan al sonrası çağrılır; askıda durumu DB'den okunur.
+func RerenderVhost(db *sql.DB, domainID int64) error {
+	var sk, php string
+	if err := db.QueryRow(`SELECT sistem_kullanici, php_surum FROM domains WHERE id=?`, domainID).Scan(&sk, &php); err != nil {
+		return err
+	}
+	socket, err := PHPSocketFor(sk, php)
+	if err != nil {
+		// askıda vhost'u PHP gerektirmez; socket çözülemese bile 503 vhost'u yazılabilir
+		socket = "/run/php-fpm/" + sk + ".sock"
+	}
+	return ApplyVhostForDomain(db, domainID, socket, php)
 }
 
 // PHPSocketFor: kullanıcı + sürüm verildiğinde aktif socket yolunu döner

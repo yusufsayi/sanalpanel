@@ -44,6 +44,7 @@ type Domain struct {
 	PlanID          *int64 `json:"plan_id,omitempty"`
 	PlanAd          string `json:"plan_ad,omitempty"`
 	SshErisim       bool   `json:"ssh_erisim"`
+	Askida          bool   `json:"askida"`
 }
 
 type Handlers struct {
@@ -55,21 +56,22 @@ const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.s
   COALESCE(DATE_FORMAT(d.ssl_bitis,'%Y-%m-%d'),''), d.durum, d.ipv4, d.ftp_host, d.ftp_user,
   d.db_host, d.db_user, d.db_adi, d.web_root, d.boyut_kb, d.trafik_kb, d.is_demo,
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
-  d.plan_id, COALESCE(p.ad,''), d.ssh_erisim
+  d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0)
   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id`
 
 func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 	var d Domain
-	var ssl, demo, sshE int
+	var ssl, demo, sshE, askida int
 	var planID sql.NullInt64
 	err := rs.Scan(&d.ID, &d.AlanAdi, &d.SistemKullanici, &d.PHPSurum, &ssl,
 		&d.SSLBitis, &d.Durum, &d.IPv4, &d.FTPHost, &d.FTPUser,
 		&d.DBHost, &d.DBUser, &d.DBAdi, &d.WebRoot, &d.BoyutKB, &d.TrafikKB, &demo,
 		&d.Notlar, &d.Olusturulma,
-		&planID, &d.PlanAd, &sshE)
+		&planID, &d.PlanAd, &sshE, &askida)
 	d.SSL = ssl == 1
 	d.IsDemo = demo == 1
 	d.SshErisim = sshE == 1
+	d.Askida = askida == 1
 	if planID.Valid {
 		v := planID.Int64
 		d.PlanID = &v
