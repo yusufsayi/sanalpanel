@@ -257,6 +257,12 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		// (Manuel temizlik için backups.RemoveDomainBackups mevcut.)
 	}
 
+	// Orphan temizliği: bu tablolarda FK cascade yok (mevcut kurulumlar için),
+	// domain silinince satırlar orphan kalmasın diye açıkça sil.
+	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM wp_bakim WHERE domain_id=?`, id)
+
 	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM domains WHERE id=?`, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+err.Error())
 		return
