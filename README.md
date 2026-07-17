@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://girginos.io"><b>🌐 girginos.io</b></a> &nbsp;·&nbsp;
+  <a href="https://girginos.io/belgeler">Belgeler</a> &nbsp;·&nbsp;
+  <a href="https://girginos.io/kur">Kurulum</a>
+</p>
+
 # GirginOSPanel
 
 Boş bir **AlmaLinux 10** sunucuyu tek komutla komple bir hosting kontrol paneline çevirir — nginx + MariaDB + çok sürümlü PHP + Valkey (Redis) + phpMyAdmin + güvenlik duvarı, hepsi otomatik kurulur ve ayarlanır.
@@ -7,7 +13,7 @@ Boş bir **AlmaLinux 10** sunucuyu tek komutla komple bir hosting kontrol paneli
 Temiz bir AlmaLinux 10 (min. 2 GB RAM) sunucuda **root** olarak:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/girginos/gpanel/main/install.sh | bash
+curl -fsSL https://girginos.io/kur | bash
 ```
 
 Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giriş bilgileri ekrana yazılır.
