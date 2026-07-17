@@ -41,18 +41,40 @@ export default function SubscriptionDetailPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [diskMB, setDiskMB] = useState<number | null>(null)
+  const [menuAcik, setMenuAcik] = useState(false)
+  const [isleniyor, setIsleniyor] = useState(false)
+  const [bildirim, setBildirim] = useState<string | null>(null)
 
-  useEffect(() => {
+  function domainYukle() {
     if (!id) return
     api.get<Domain>(`/domains/${id}`)
       .then(r => setDomain(r.data))
       .catch(e => setHata(apiHata(e, 'Abonelik yüklenemedi')))
+  }
+
+  useEffect(() => {
+    if (!id) return
+    domainYukle()
     api.get<{ disk_mb: { kullanim: number } }>(`/domains/${id}/kaynak`)
       .then(r => setDiskMB(r.data.disk_mb.kullanim))
       .catch(() => {})
   }, [id])
 
-  if (hata) return (
+  async function askiToggle() {
+    if (!id || !domain) return
+    const askiyaAl = !domain.askida
+    if (askiyaAl && !window.confirm(`"${domain.alan_adi}" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?`)) return
+    setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
+    try {
+      await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
+      setBildirim(askiyaAl ? '✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.' : '✓ Askı kaldırıldı — site tekrar erişilebilir.')
+      setTimeout(() => setBildirim(null), 6000)
+      domainYukle()
+    } catch (e) { setHata(apiHata(e, 'İşlem başarısız')) }
+    finally { setIsleniyor(false) }
+  }
+
+  if (hata && !domain) return (
     <div className="px-6 py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' }, { etiket: 'Hata' }]} />
       <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4 text-sm text-red-700 dark:text-red-300">{hata}</div>
@@ -85,18 +107,56 @@ export default function SubscriptionDetailPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-semibold tracking-wider flex items-center gap-1 ${
-          domain.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:text-slate-400 dark:text-slate-500'
-        }`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${domain.durum === 'aktif' ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-          {domain.durum}
-        </span>
-        <button className="ml-1 p-1 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 rounded" title="Daha fazla işlem">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
-          </svg>
-        </button>
+        {domain.askida ? (
+          <span className="text-[10px] px-2 py-0.5 rounded uppercase font-semibold tracking-wider flex items-center gap-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+            Askıda
+          </span>
+        ) : (
+          <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-semibold tracking-wider flex items-center gap-1 ${
+            domain.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:text-slate-400 dark:text-slate-500'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${domain.durum === 'aktif' ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+            {domain.durum}
+          </span>
+        )}
+        <div className="relative ml-1">
+          <button
+            onClick={() => setMenuAcik(v => !v)}
+            disabled={isleniyor}
+            className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded disabled:opacity-50"
+            title="Daha fazla işlem">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
+            </svg>
+          </button>
+          {menuAcik && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuAcik(false)} />
+              <div className="absolute left-0 mt-1 z-20 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-1 text-sm">
+                <button
+                  onClick={askiToggle}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-700/60 ${domain.askida ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
+                  {domain.askida ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
+                      Askıdan Al (Geri Getir)
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6M9 3h6a2 2 0 012 2v0H7v0a2 2 0 012-2z" /></svg>
+                      Hesabı Askıya Al
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
+      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       <div className="flex items-center gap-5 border-b border-slate-200 dark:border-slate-700 mb-5">
         <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>Pano</TabBtn>

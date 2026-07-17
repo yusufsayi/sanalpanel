@@ -20,6 +20,7 @@ export type Domain = {
   web_root: string
   notlar?: string
   ssh_erisim?: boolean
+  askida?: boolean
 }
 
 export default function DomainList({

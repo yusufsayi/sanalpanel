@@ -34,6 +34,8 @@ const GRUPLAR: { ad: string; aciklar: Arac[] }[] = [
         href: '/hizmet-planlari', ikon: '📋', renk: 'sky', hazir: true },
       { baslik: 'Servisler', aciklama: 'Nginx / Apache / MariaDB / DNS / PHP-FPM servislerini yeniden başlat.',
         href: '/araclar/servisler', ikon: '🔁', renk: 'rose', hazir: true },
+      { baslik: 'DNS Şablonu', aciklama: 'Yeni domainlere uygulanan merkezi DNS kayıtları (A/MX/SPF/DMARC/DKIM) + SOA. Düzenlenebilir.',
+        href: '/araclar/dns-sablonu', ikon: '🌍', renk: 'emerald', hazir: true, rozet: 'Merkezi' },
     ],
   },
   {
