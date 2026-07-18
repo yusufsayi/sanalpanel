@@ -488,16 +488,31 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kaydet: "+err.Error())
 		return
 	}
-	socket, err := ApplyToFilesystem(sk, surum, req.Ayarlar)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "pool yaz: "+err.Error())
-		return
-	}
 
-	// nginx vhost'u yeni socket'le yeniden render et + reload (kritik!)
-	if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, surum); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx vhost: "+err.Error())
-		return
+	// 🔴 Per-tenant FPM (Seçenek A) aktifse ayarlar per-tenant pool'a uygulanır
+	// (paylaşılan /etc/php-fpm.d/<sk>.conf DEĞİL). EnableTenantFPM idempotenttir:
+	// pool'u DB ayarlarından yeniden render eder, servisi restart eder, nginx'i
+	// per-tenant socket'e re-render eder. Başarısızlıkta paylaşılan düzene rollback.
+	var socket string
+	if provisioner.TenantFPMActive(sk) {
+		s, err := provisioner.EnableTenantFPM(h.DB, id, sk, surum)
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "per-tenant fpm: "+err.Error())
+			return
+		}
+		socket = s
+	} else {
+		s, err := ApplyToFilesystem(sk, surum, req.Ayarlar)
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "pool yaz: "+err.Error())
+			return
+		}
+		socket = s
+		// nginx vhost'u yeni socket'le yeniden render et + reload (kritik!)
+		if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, surum); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "nginx vhost: "+err.Error())
+			return
+		}
 	}
 
 	if req.PHPSurum != "" {

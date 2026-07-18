@@ -33,6 +33,7 @@ type Plan struct {
 	InodeKota          int    `json:"inode_kota"`
 	IOAgirlik          int    `json:"io_agirlik"` // 1-1000 (systemd IOWeight)
 	MySQLMaxBaglanti   int    `json:"mysql_max_baglanti"`
+	PMMaxChildren      int    `json:"pm_max_children"` // PHP-FPM pm.max_children; 0 = otomatik max(4, ram_mb/64)
 	PHPSurum           string `json:"php_surum"`
 	FastCgiCache       bool   `json:"fastcgi_cache"`
 	ClientMaxBodyMB    int    `json:"client_max_body_mb"`
@@ -48,6 +49,7 @@ type Handlers struct {
 const selectAll = `SELECT id, ad, aciklama, disk_kota_mb, trafik_kota_mb,
   max_domain, max_db, max_email, max_ftp,
   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
+  COALESCE(pm_max_children,0),
   php_surum, fastcgi_cache, client_max_body_mb, COALESCE(nginx_ek_direktifler,''), varsayilan, DATE_FORMAT(created_at,'%Y-%m-%d') FROM service_plans`
 
 func b01(b bool) int {
@@ -63,6 +65,7 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 	err := rs.Scan(&p.ID, &p.Ad, &p.Aciklama, &p.DiskKotaMB, &p.TrafikKotaMB,
 		&p.MaxDomain, &p.MaxDB, &p.MaxEmail, &p.MaxFTP,
 		&p.CPUYuzde, &p.RAMMB, &p.MaxProcess, &p.InodeKota, &p.IOAgirlik, &p.MySQLMaxBaglanti,
+		&p.PMMaxChildren,
 		&p.PHPSurum, &fc, &p.ClientMaxBodyMB, &p.NginxEkDirektifler, &vars, &p.Olusturulma)
 	p.Varsayilan = vars == 1
 	p.FastCgiCache = fc == 1
@@ -162,11 +165,13 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
 		   max_domain, max_db, max_email, max_ftp,
 		   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
+		   pm_max_children,
 		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
+		p.PMMaxChildren,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -204,11 +209,13 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		`UPDATE service_plans SET ad=?, aciklama=?, disk_kota_mb=?, trafik_kota_mb=?,
 		   max_domain=?, max_db=?, max_email=?, max_ftp=?,
 		   cpu_yuzde=?, ram_mb=?, max_process=?, inode_kota=?, io_agirlik=?, mysql_max_baglanti=?,
+		   pm_max_children=?,
 		   php_surum=?, fastcgi_cache=?, client_max_body_mb=?, nginx_ek_direktifler=?, varsayilan=?
 		 WHERE id=?`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
+		p.PMMaxChildren,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -272,30 +279,61 @@ func SeedIfEmpty(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 	log.Printf("seed: 3 demo paket ekleniyor")
-	rows := []struct {
-		Ad, Aciklama                                 string
-		Disk, Trafik, MaxDom, MaxDB, MaxMail, MaxFTP int
-		CPU, RAM, Proc, Inode, IO, MyC               int
-		Default                                      int
-	}{
-		{"Başlangıç", "Tek site, küçük proje", 1024, 5120, 1, 1, 5, 2,
-			50, 256, 30, 25000, 100, 15, 1},
-		{"Standart", "Birden çok proje + e-posta", 10240, 51200, 5, 10, 25, 10,
-			100, 512, 60, 100000, 100, 30, 0},
-		{"Profesyonel", "Yoğun trafik + büyük site", 51200, 204800, 25, 50, 100, 50,
-			200, 2048, 150, 500000, 200, 100, 0},
-	}
-	for _, p := range rows {
+	for _, p := range seedPlanlari() {
 		_, err := db.ExecContext(ctx,
 			`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
 			   max_domain, max_db, max_email, max_ftp,
 			   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
-			   varsayilan)
-			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			   pm_max_children, varsayilan)
+			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			p.Ad, p.Aciklama, p.Disk, p.Trafik, p.MaxDom, p.MaxDB, p.MaxMail, p.MaxFTP,
-			p.CPU, p.RAM, p.Proc, p.Inode, p.IO, p.MyC, p.Default)
+			p.CPU, p.RAM, p.Proc, p.Inode, p.IO, p.MyC, p.PMMax, p.Default)
 		if err != nil {
 			log.Printf("seed plan %s: %v", p.Ad, err)
+		}
+	}
+	return nil
+}
+
+// seedTier: standart demo paketlerin sabit tanımı (SeedIfEmpty + SeedSync ortak kaynağı).
+type seedTier struct {
+	Ad, Aciklama                                 string
+	Disk, Trafik, MaxDom, MaxDB, MaxMail, MaxFTP int
+	CPU, RAM, Proc, Inode, IO, MyC, PMMax        int
+	Default                                      int
+}
+
+func seedPlanlari() []seedTier {
+	return []seedTier{
+		{"Başlangıç", "Tek site, küçük proje", 1024, 5120, 1, 1, 5, 2,
+			50, 256, 30, 25000, 100, 15, 4, 1},
+		{"Standart", "Birden çok proje + e-posta", 10240, 51200, 5, 10, 25, 10,
+			100, 512, 60, 100000, 100, 30, 8, 0},
+		{"Profesyonel", "Yoğun trafik + büyük site", 51200, 204800, 25, 50, 100, 50,
+			200, 2048, 150, 500000, 200, 100, 32, 0},
+	}
+}
+
+// SeedSync: idempotent tohum senkronu — MEVCUT planlara DOKUNMADAN eksik standart
+// tier'ları ekler (INSERT ... WHERE NOT EXISTS ad). SeedIfEmpty yalnız tablo boşken
+// çalışır; SeedSync ise 177 gibi zaten dolu kurulumlarda yeni tier'ları güvenle ekler.
+// Operatör tarafından düzenlenmiş planların değerleri KORUNUR.
+func SeedSync(ctx context.Context, db *sql.DB) error {
+	for _, p := range seedPlanlari() {
+		// Varsayılan bayrağını burada set ETME (mevcut varsayılanı ezmemek için);
+		// yalnız plan hiç yoksa, adıyla ekle.
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
+			   max_domain, max_db, max_email, max_ftp,
+			   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
+			   pm_max_children, varsayilan)
+			 SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
+			 FROM DUAL
+			 WHERE NOT EXISTS (SELECT 1 FROM service_plans WHERE ad=?)`,
+			p.Ad, p.Aciklama, p.Disk, p.Trafik, p.MaxDom, p.MaxDB, p.MaxMail, p.MaxFTP,
+			p.CPU, p.RAM, p.Proc, p.Inode, p.IO, p.MyC, p.PMMax, p.Ad)
+		if err != nil {
+			log.Printf("SeedSync plan %s: %v", p.Ad, err)
 		}
 	}
 	return nil

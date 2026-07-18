@@ -40,7 +40,8 @@ func Init(d *sql.DB) {
 	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
 	HealPanelVhostHeadersOnStartup()
 	HealVhostsOnStartup()
-	HealHomePerms() // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
+	HealHomePerms()            // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
+	EnsureTenantFPMOnStartup() // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -799,6 +800,8 @@ func Deprovision(alanAdi, sk string) error {
 			_ = os.Remove(s)
 		}
 	}
+	// Per-tenant FPM (Seçenek A) izlerini kaldır (servis + unit + config + run dizini + .bak).
+	TeardownTenantFPM(sk)
 	for _, ay := range phpMap {
 		p := filepath.Join(ay.PoolDir, sk+".conf")
 		if _, err := os.Stat(p); err == nil {
@@ -1124,6 +1127,13 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida); err != nil {
 		return fmt.Errorf("domain bilgi cek: %w", err)
 	}
+	// 🔴 Per-tenant FPM (Seçenek A) aktifse socket'i DAİMA per-tenant socket'e zorla —
+	// çağıran hangi socket'i geçerse geçsin (paylaşılan/heal socket'i) nginx doğru
+	// FPM'e bağlanır. Böylece SetPHP/SSL/suspend/korumalı-dizin render'ları per-tenant
+	// tenant'ta 502 üretmez.
+	if TenantFPMActive(sk) {
+		socket = tenantSocket(sk)
+	}
 	home := "/home/" + sk
 
 	// nginx_settings (yoksa default true)
@@ -1198,8 +1208,20 @@ func RerenderVhost(db *sql.DB, domainID int64) error {
 	return ApplyVhostForDomain(db, domainID, socket, php)
 }
 
-// PHPSocketFor: kullanıcı + sürüm verildiğinde aktif socket yolunu döner
+// PHPSocketFor: nginx vhost'un fastcgi_pass etmesi gereken socket. Per-tenant FPM
+// (Seçenek A) aktifse onun izole socket'i; değilse paylaşılan master socket'i.
+// Böylece TÜM çağıranlar (subdomain/sifrekoruma/nginxset/handlers) otomatik olarak
+// doğru socket'i alır — cutover sonrası ayrı edit gerekmez.
 func PHPSocketFor(sk, surum string) (string, error) {
+	if TenantFPMActive(sk) {
+		return tenantSocket(sk), nil
+	}
+	return sharedSocketPath(sk, surum)
+}
+
+// sharedSocketPath: paylaşılan php-fpm master socket yolu (per-tenant'tan bağımsız).
+// EnableTenantFPM/RollbackToSharedFPM içinde doğrudan kullanılır (recursion olmasın).
+func sharedSocketPath(sk, surum string) (string, error) {
 	surum = normalizePHP(surum)
 	// AppStream 8.3
 	if surum == "8.3" {
@@ -1311,16 +1333,25 @@ func HealVhostsOnStartup() {
 
 	var ok, fail int
 	for _, d := range list {
-		// 1) pool'u yeni template ile yeniden yaz (php-fpm -t + rollback iceride).
-		socket, _, perr := writePoolValidated(d.sk, d.php)
-		if perr != nil {
-			log.Printf("vhost heal: %s pool yeniden yazilamadi (vhost yine denenecek): %v", d.sk, perr)
-			if s, e := PHPSocketFor(d.sk, d.php); e == nil {
-				socket = s
+		var socket string
+		if TenantFPMActive(d.sk) {
+			// Per-tenant FPM (Seçenek A) aktif: paylaşılan pool'a DOKUNMA (yoksa .bak'a
+			// aldığımız pool'u geri yaratıp çakışan ikinci bir master kurardık). Socket
+			// per-tenant socket'tir; servis EnsureTenantFPMOnStartup ile ayakta tutulur.
+			socket = tenantSocket(d.sk)
+		} else {
+			// 1) pool'u yeni template ile yeniden yaz (php-fpm -t + rollback iceride).
+			s, _, perr := writePoolValidated(d.sk, d.php)
+			if perr != nil {
+				log.Printf("vhost heal: %s pool yeniden yazilamadi (vhost yine denenecek): %v", d.sk, perr)
+				if ps, e := sharedSocketPath(d.sk, d.php); e == nil {
+					s = ps
+				}
 			}
-		}
-		if socket == "" {
-			socket = "/run/php-fpm/" + d.sk + ".sock"
+			socket = s
+			if socket == "" {
+				socket = "/run/php-fpm/" + d.sk + ".sock"
+			}
 		}
 		// 2) vhost'u yeni template ile yeniden render et (nginx -t + rollback iceride).
 		if aerr := ApplyVhostForDomain(pkgDB, d.id, socket, d.php); aerr != nil {

@@ -85,6 +85,11 @@ func main() {
 	if err := plans.SeedIfEmpty(context.Background(), d); err != nil {
 		log.Printf("plans seed warn: %v", err)
 	}
+	// SeedSync: dolu kurulumlarda (ör. 177) mevcut planlara DOKUNMADAN eksik standart
+	// tier'ları idempotent ekler.
+	if err := plans.SeedSync(context.Background(), d); err != nil {
+		log.Printf("plans seed-sync warn: %v", err)
+	}
 	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
 		log.Printf("dns template seed warn: %v", err)
 	}

@@ -9,6 +9,7 @@ type Plan = {
   max_domain: number; max_db: number; max_email: number; max_ftp: number
   cpu_yuzde: number; ram_mb: number; max_process: number
   inode_kota: number; io_agirlik: number; mysql_max_baglanti: number
+  pm_max_children: number
   php_surum: string
   fastcgi_cache: boolean; client_max_body_mb: number; nginx_ek_direktifler: string
   varsayilan: boolean; olusturulma: string
@@ -173,6 +174,9 @@ export default function PaketDetayPage() {
             </Alan>
             <Alan etiket="I/O Ağırlık" ipucu="systemd IOWeight (1-1000)">
               <input type="number" min={1} max={1000} value={plan.io_agirlik} onChange={e => P('io_agirlik', Number(e.target.value) || 0)} className={inpNum} />
+            </Alan>
+            <Alan etiket="PHP-FPM max_children" ipucu="0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.">
+              <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = Otomatik" />
             </Alan>
           </div>
         </Kart>

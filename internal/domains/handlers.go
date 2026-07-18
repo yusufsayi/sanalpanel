@@ -10,10 +10,12 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/dns"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
@@ -135,6 +137,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.AlanAdi = strings.ToLower(strings.TrimSpace(req.AlanAdi))
+	// Plan seçilmediyse varsayılan planı ata — kaynak limitleri HER domaine uygulanır
+	// (plan-driven default). Varsayılan yoksa plansız devam eder (limit uygulanmaz).
+	if req.PlanID == nil {
+		var defID int64
+		if e := h.DB.QueryRowContext(r.Context(),
+			`SELECT id FROM service_plans WHERE varsayilan=1 ORDER BY id LIMIT 1`).Scan(&defID); e == nil && defID > 0 {
+			req.PlanID = &defID
+		}
+	}
 	if req.PHPSurum == "" {
 		req.PHPSurum = "8.3"
 		// Plan seçildiyse PHP sürümünü plandan miras al
@@ -194,6 +205,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// Plan seçildiyse nginx web-sunucusu varsayılanlarını domain'e tohumla + vhost yenile
 	if req.PlanID != nil {
 		h.applyPlanNginxDefaults(r.Context(), id, *req.PlanID, pr.SistemKullanici, req.PHPSurum)
+		// Kaynak limitleri + per-tenant FPM (Seçenek A) — arka planda, kendi 5dk context'i
+		// (r.Context() HTTP request bitince iptal olur, cutover yarıda kalır). SetPlan ile aynı desen.
+		go func(did int64) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
+				log.Printf("kaynaklimit apply (create) domain=%d: %v", did, err)
+			}
+		}(id)
 	}
 
 	// 3) FTP hesap (random parola)
@@ -245,10 +265,12 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	if isDemo == 0 {
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(h.DB, id)
-		// nginx vhost + PHP pool + Linux user
+		// nginx vhost + PHP pool + Linux user + per-tenant FPM servisi (Deprovision içinde)
 		if err := provisioner.Deprovision(alanAdi, sk); err != nil {
 			log.Printf("deprovision warn (%s): %v", alanAdi, err)
 		}
+		// Kaynak-limit slice'ını (girginos-<sk>.slice) kaldır (Deprovision FPM'i söktü).
+		_ = kaynaklimit.SystemdSliceSil(sk)
 		// Redis tenant cache: Valkey ACL user + WP drop-in + cp_domain_redis satırı.
 		// cp_domain_redis'te CASCADE FK olmadığı için domain silinince satır orphan kalıyordu.
 		redis.KapatDomain(h.DB, id, sk)
