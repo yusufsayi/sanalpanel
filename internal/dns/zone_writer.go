@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -16,6 +18,9 @@ import (
 const (
 	ZoneDir          = "/var/named"
 	NamedConfInclude = "/etc/named/girginospanel-zones.conf"
+	// DNSSECKeyDir: dnssec-policy anahtar dizini. /var/named/dynamic zaten named_cache_t
+	// SELinux etiketli ve named'e yazılabilir (ekstra SELinux ayarı gerektirmez).
+	DNSSECKeyDir = "/var/named/dynamic"
 )
 
 // fqdn: hedef alan adi (NS/MX/CNAME/SRV) trailing nokta ile bitmeliki BIND
@@ -113,6 +118,40 @@ type zoneCtx struct {
 	Kayitlar []Kayit
 }
 
+// readZoneSerial: mevcut zone dosyasından SOA serial'ini oku (yoksa/okunamazsa 0 dön).
+// Şablon çıktısı "    2026071815  ; serial" formatındadır.
+func readZoneSerial(path string) uint32 {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.Contains(line, "; serial") {
+			continue
+		}
+		for _, f := range strings.Fields(line) {
+			if n, perr := strconv.ParseUint(f, 10, 32); perr == nil {
+				return uint32(n)
+			}
+		}
+	}
+	return 0
+}
+
+// nextSerial: MONOTON ARTAN SOA serial üretir (uint32 sınırı içinde, DNS RFC1982).
+// Taban = yyyymmdd00 (günlük sayaç için 2 hane). Aynı gün (veya eski format yyyymmddHH)
+// içinde tekrar yazımda mevcut serial'i +1 artırır → aynı dakikada 2 düzenlemede bile
+// serial ilerler; BIND değişikliği görür ve DNSSEC yeniden-imzalaması tetiklenir.
+// (Eski yyyymmddHH şeması aynı saat içinde sabit kalıyor, DNSSEC re-sign kaçıyordu.)
+func nextSerial(old uint32) uint32 {
+	now := time.Now().UTC()
+	base := uint32(now.Year()*1000000 + int(now.Month())*10000 + now.Day()*100)
+	if old >= base {
+		return old + 1
+	}
+	return base
+}
+
 func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	var alanAdi string
 	if err := db.QueryRowContext(ctx, `SELECT alan_adi FROM domains WHERE id=?`, domainID).Scan(&alanAdi); err != nil {
@@ -137,19 +176,18 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 		return nil
 	}
 
-	// serial: yyyymmddHH + sn (saniye granularity, 10 hane max DNS standardı için)
-	// Format: yyyymmddNN where NN is HH (00-23). Aynı saat içinde tekrar yazımda BIND eski cache'i tutabilir;
-	// bu durumda named.run.log uyarı verir ama prod'da nadir.
-	serial := time.Now().UTC().Format("2006010215")
+	_ = os.MkdirAll(ZoneDir, 0750)
+	zonePath := filepath.Join(ZoneDir, alanAdi+".zone")
+
+	// serial: MONOTON ARTAN (mevcut serial'i baz alır). Aynı dakikada 2 düzenlemede bile
+	// ilerler → BIND değişikliği görür, DNSSEC yeniden-imzalama tetiklenir.
+	serial := strconv.FormatUint(uint64(nextSerial(readZoneSerial(zonePath))), 10)
 
 	soa := LoadSOA(ctx, db, domainID, alanAdi)
 	var buf bytes.Buffer
 	if err := zoneTmpl.Execute(&buf, zoneCtx{AlanAdi: alanAdi, Serial: serial, SOA: soa, Kayitlar: kayitlar}); err != nil {
 		return err
 	}
-
-	_ = os.MkdirAll(ZoneDir, 0750)
-	zonePath := filepath.Join(ZoneDir, alanAdi+".zone")
 
 	// Önce GEÇİCİ dosyaya yaz + named-checkzone ile doğrula; SADECE geçerliyse
 	// canlı zone dosyasının üzerine taşı. Böylece hatalı bir kayıt (ör. A kaydına
@@ -161,6 +199,13 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	if out, err := exec.Command("named-checkzone", alanAdi, tmpPath).CombinedOutput(); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("zone geçersiz (%s): %s", alanAdi, strings.TrimSpace(string(out)))
+	}
+	// .bak yedeği: atomik-rename mevcut dosyanın üzerine yazar; taşımadan ÖNCE bir kopya
+	// bırak ki hatalı bir düzenlemeden geri dönüş (veya denetim) mümkün olsun.
+	if _, statErr := os.Stat(zonePath); statErr == nil {
+		if prev, rerr := os.ReadFile(zonePath); rerr == nil {
+			_ = os.WriteFile(zonePath+".bak", prev, 0640)
+		}
 	}
 	if err := os.Rename(tmpPath, zonePath); err != nil {
 		_ = os.Remove(tmpPath)
@@ -177,9 +222,14 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 }
 
 // reloadNamed: zone'ları yeniden yükle. Önce rndc reload dener; bazı kurulumlarda
-// rndc anahtarı yok/başarısız olur → o zaman systemctl reload, o da olmazsa restart named.
+// rndc anahtarı yok/başarısız olur → o zaman systemctl reload.
 // (Eskiden sadece "rndc reload" vardı; başarısızsa değişiklik etki etmiyordu ve
 // operatör elle "systemctl restart named" yapmak zorunda kalıyordu.)
+//
+// 🔴 GÜVENLİK: son çare "systemctl restart named" named'i DURDURUP tekrar başlatır;
+// config geçersizse named AYAĞA KALKMAZ → tüm DNS çöker (outage). checkconf-gate'li
+// updateZoneIncludes bozuk include'un canlıya inmesini zaten engeller; yine de
+// defense-in-depth olarak restart'a TIRMANMADAN ÖNCE named-checkconf ile doğrula.
 func reloadNamed() {
 	if err := exec.Command("rndc", "reload").Run(); err == nil {
 		return
@@ -187,26 +237,77 @@ func reloadNamed() {
 	if err := exec.Command("systemctl", "reload", "named").Run(); err == nil {
 		return
 	}
+	if err := exec.Command("named-checkconf").Run(); err != nil {
+		log.Printf("dns reloadNamed: named-checkconf başarısız → 'systemctl restart named' ATLANDI (çalışan named korunuyor): %v", err)
+		return
+	}
 	_ = exec.Command("systemctl", "restart", "named").Run()
 }
 
-func updateZoneIncludes(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT d.alan_adi FROM domains d
+// buildZoneIncludes: aktif kaydı olan tüm zone'lar için named include içeriğini üretir.
+//   - allow-transfer { none; } HER ZAMAN → secondary yok, AXFR ile zone enumerasyonu engellenir.
+//   - dnssec_aktif=1 ise BIND 9.18 gömülü "default" dnssec-policy (CSK/ECDSAP256SHA256,
+//     inline-signing, CDS/CDNSKEY otomatik) + anahtar dizini eklenir.
+func buildZoneIncludes(ctx context.Context, db *sql.DB) (string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT d.alan_adi, d.dnssec_aktif FROM domains d
 	  WHERE EXISTS (SELECT 1 FROM dns_records r WHERE r.domain_id=d.id AND r.aktif=1)`)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer rows.Close()
 	var sb strings.Builder
 	sb.WriteString("// girginospanel — otomatik üretildi\n")
 	for rows.Next() {
 		var alanAdi string
-		if err := rows.Scan(&alanAdi); err == nil {
-			fmt.Fprintf(&sb, `zone "%s" { type master; file "%s/%s.zone"; allow-query { any; }; };
-`, alanAdi, ZoneDir, alanAdi)
+		var dnssec int
+		if serr := rows.Scan(&alanAdi, &dnssec); serr != nil {
+			continue
 		}
+		fmt.Fprintf(&sb, `zone "%s" { type master; file "%s/%s.zone"; allow-query { any; }; allow-transfer { none; };`,
+			alanAdi, ZoneDir, alanAdi)
+		if dnssec == 1 {
+			fmt.Fprintf(&sb, ` dnssec-policy default; key-directory "%s"; inline-signing yes;`, DNSSECKeyDir)
+		}
+		sb.WriteString(" };\n")
 	}
-	return os.WriteFile(NamedConfInclude, []byte(sb.String()), 0644)
+	return sb.String(), rows.Err()
+}
+
+// updateZoneIncludes: include dosyasını CHECKCONF-GATE ile atomik günceller.
+// Önce .tmp'ye yaz → named-checkconf ile doğrula → SADECE geçerliyse os.Rename ile
+// canlının üzerine taşı + restorecon. Geçersizse .tmp silinir ve hata döner; canlı
+// include'a HİÇ DOKUNULMAZ → bozuk bir zone-statement asla named'i düşüremez.
+func updateZoneIncludes(ctx context.Context, db *sql.DB) error {
+	content, err := buildZoneIncludes(ctx, db)
+	if err != nil {
+		return err
+	}
+	tmp := NamedConfInclude + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
+		return err
+	}
+	if out, cerr := exec.Command("named-checkconf", tmp).CombinedOutput(); cerr != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("zone-include geçersiz (canlıya inmedi): %s", strings.TrimSpace(string(out)))
+	}
+	if err := os.Rename(tmp, NamedConfInclude); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	_, _ = exec.Command("restorecon", NamedConfInclude).CombinedOutput()
+	return nil
+}
+
+// HealZoneIncludes: başlangıç iyileştirmesi (startup heal). Mevcut tüm zone'lara güncel
+// include şablonunu (AXFR-kilit + varsa DNSSEC) checkconf-gate'li olarak uygular ve
+// named'i yeniden yükler. Böylece kural yalnız bir sonraki DNS düzenlemesinde değil,
+// server açılışında da tüm eski zone'lara işler.
+func HealZoneIncludes(ctx context.Context, db *sql.DB) error {
+	if err := updateZoneIncludes(ctx, db); err != nil {
+		return err
+	}
+	reloadNamed()
+	return nil
 }
 
 func DeleteZone(ctx context.Context, db *sql.DB, alanAdi string) error {

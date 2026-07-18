@@ -88,6 +88,12 @@ func main() {
 	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
 		log.Printf("dns template seed warn: %v", err)
 	}
+	// Startup heal: mevcut tüm zone'lara güncel include şablonunu (AXFR-kilit + varsa DNSSEC)
+	// checkconf-gate'li uygula. Böylece kural yalnız sonraki DNS düzenlemesinde değil,
+	// açılışta da eski zone'lara işler. named yoksa/erişilemezse yalnız uyarı loglanır.
+	if err := dns.HealZoneIncludes(context.Background(), d); err != nil {
+		log.Printf("dns zone-include heal warn: %v", err)
+	}
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
@@ -275,6 +281,8 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/toplu-durum", dnsH.TopluDurum)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/soa", dnsH.GetSOA)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/soa", dnsH.PutSOA)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/dnssec", dnsH.GetDNSSEC)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/dnssec", dnsH.PostDNSSEC)
 				// Merkezi DNS şablonu (admin) — domain eklerken + "Şablonu Uygula" bunu okur
 				r.With(middleware.AdminOnly).Get("/dns-template", dnsH.GetTemplate)
 				r.With(middleware.AdminOnly).Put("/dns-template", dnsH.PutTemplate)

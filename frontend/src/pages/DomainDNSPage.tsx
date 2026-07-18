@@ -21,6 +21,8 @@ type Kayit = {
 
 type Domain = { id: number; alan_adi: string; ipv4: string }
 
+type DNSSEC = { aktif: boolean; imzali: boolean; ds: string[]; durum: string }
+
 const TIPLER = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'PTR', 'DS', 'TLSA', 'SSHFP', 'NAPTR']
 
 // Her tip için Değer alanına gösterilecek format ipucu
@@ -54,6 +56,10 @@ export default function DomainDNSPage() {
   const [soa, setSoa] = useState<{ primary_ns: string; hostmaster: string; refresh: number; retry: number; expire: number; minimum: number; ttl: number } | null>(null)
   const [soaAcik, setSoaAcik] = useState(false)
   const [soaKaydediyor, setSoaKaydediyor] = useState(false)
+  const [dnssec, setDnssec] = useState<DNSSEC | null>(null)
+  const [dnssecIsliyor, setDnssecIsliyor] = useState(false)
+  const [dnssecKapatOnay, setDnssecKapatOnay] = useState(false)
+  const [dsKopyalandi, setDsKopyalandi] = useState(false)
 
   function yukle() {
     if (!id) return
@@ -97,9 +103,27 @@ export default function DomainDNSPage() {
     if (id) {
       api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
       api.get<typeof soa>(`/domains/${id}/dns/soa`).then(r => setSoa(r.data)).catch(() => {})
+      api.get<DNSSEC>(`/domains/${id}/dns/dnssec`).then(r => setDnssec(r.data)).catch(() => {})
     }
     yukle()
   }, [id])
+
+  async function dnssecDegistir(aktif: boolean) {
+    if (!id) return
+    setHata(null); setBasari(null); setDnssecKapatOnay(false); setDnssecIsliyor(true)
+    try {
+      const { data } = await api.post<DNSSEC>(`/domains/${id}/dns/dnssec`, { aktif })
+      setDnssec(data)
+      setBasari(aktif
+        ? 'DNSSEC etkinleştirildi. Aşağıdaki DS kaydını alan adı operatörünüze (registrar) girin.'
+        : 'DNSSEC kapatıldı.')
+    } catch (e) { setHata(apiHata(e, 'DNSSEC güncellenemedi')) }
+    finally { setDnssecIsliyor(false) }
+  }
+  async function dnssecDurumYenile() {
+    if (!id) return
+    try { const { data } = await api.get<DNSSEC>(`/domains/${id}/dns/dnssec`); setDnssec(data) } catch { /* yut */ }
+  }
 
   async function soaKaydet(e: React.FormEvent) {
     e.preventDefault()
@@ -187,6 +211,58 @@ export default function DomainDNSPage() {
                 </button>
               </div>
             </form>
+          )}
+        </div>
+      )}
+
+      {dnssec && (
+        <div className="border border-slate-200 dark:border-slate-800 rounded-xl mb-4 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
+            <div>
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                🔐 DNSSEC
+                {dnssec.aktif ? (
+                  dnssec.imzali
+                    ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-medium">imzalı</span>
+                    : <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">imzalanıyor…</span>
+                ) : (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium">kapalı</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Zone imzalama (BIND inline-signing). Açtıktan sonra oluşan DS kaydını alan adı operatörünüze girin.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {dnssec.aktif && (
+                <button onClick={dnssecDurumYenile} className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-md transition">↻ Durum</button>
+              )}
+              {dnssec.aktif ? (
+                <button disabled={dnssecIsliyor} onClick={() => setDnssecKapatOnay(true)} className="px-3 py-1.5 text-sm bg-white dark:bg-slate-800 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition disabled:opacity-50">Kapat</button>
+              ) : (
+                <button disabled={dnssecIsliyor} onClick={() => dnssecDegistir(true)} className="px-3 py-1.5 text-sm bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-medium rounded-md transition disabled:opacity-50">{dnssecIsliyor ? 'Etkinleştiriliyor…' : 'Etkinleştir'}</button>
+              )}
+            </div>
+          </div>
+          {dnssec.aktif && (
+            <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-800 pt-3">
+              {dnssec.ds && dnssec.ds.length > 0 ? (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-1">DS Kaydı — registrar'a girin</div>
+                  {dnssec.ds.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2 mb-1">
+                      <code className="flex-1 text-xs font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 break-all text-slate-800 dark:text-slate-200">{d}</code>
+                      <button onClick={() => { navigator.clipboard?.writeText(d); setDsKopyalandi(true); setTimeout(() => setDsKopyalandi(false), 1500) }}
+                        className="px-2 py-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded transition whitespace-nowrap">{dsKopyalandi ? '✓ Kopyalandı' : 'Kopyala'}</button>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Bu DS kaydını alan adınızın operatöründe (registrar) DNSSEC/DS alanına girin. Yayılması TTL süresi kadar sürebilir.</p>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-600 dark:text-amber-400">İmzalama sürüyor; DS kaydı henüz hazır değil. Birkaç saniye sonra “↻ Durum”a basın.</p>
+              )}
+              {dnssec.durum && (
+                <pre className="mt-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-2 overflow-x-auto max-h-44">{dnssec.durum}</pre>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -315,6 +391,16 @@ export default function DomainDNSPage() {
         onayMetni={`Evet, ${secili.size} kaydı sil`}
         onOnay={topluSil}
         onIptal={() => setTopluSilOnay(false)}
+      />
+
+      <ConfirmDialog
+        acik={dnssecKapatOnay}
+        baslik="DNSSEC'i kapat"
+        mesaj="ÖNEMLİ: DNSSEC'i kapatmadan ÖNCE alan adı operatörünüzden (registrar) DS kaydını SİLİN ve TTL süresi kadar bekleyin. Aksi halde alan adınız çözümlenemez hale gelir (SERVFAIL). DS kaydını sildiyseniz devam edin."
+        tehlikeli
+        onayMetni="DS'i sildim, kapat"
+        onOnay={() => dnssecDegistir(false)}
+        onIptal={() => setDnssecKapatOnay(false)}
       />
     </div>
   )
