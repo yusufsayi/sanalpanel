@@ -302,8 +302,9 @@ server {
         add_header X-Cache-Status $upstream_cache_status always;
 {{end}}    }
 {{end}}
-{{if .BrowserCache}}    # ---- Browser cache (statik dosyalar) — arsiv (zip/gz) DENY blogunda tutuluyor ----
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf)$ {
+{{if .BrowserCache}}    # ---- Browser cache (statik + MESRU arsiv indirmeleri) ----
+    # NOT: zip/gz MESRU; hassas .sql.gz deny blogunda (bu location'dan ONCE) yakalanir.
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf|zip|gz)$ {
         expires {{.BrowserCacheGun}}d;
         access_log off;
         add_header Cache-Control "public, immutable" always;
@@ -382,8 +383,9 @@ server {
         add_header X-Cache-Status $upstream_cache_status always;
 {{end}}    }
 {{end}}
-{{if .BrowserCache}}    # ---- Browser cache (statik dosyalar) — arsiv (zip/gz) DENY blogunda tutuluyor ----
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf)$ {
+{{if .BrowserCache}}    # ---- Browser cache (statik + MESRU arsiv indirmeleri) ----
+    # NOT: zip/gz MESRU; hassas .sql.gz deny blogunda (bu location'dan ONCE) yakalanir.
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf|zip|gz)$ {
         expires {{.BrowserCacheGun}}d;
         access_log off;
         add_header Cache-Control "public, immutable" always;
@@ -406,7 +408,9 @@ server {
 const denyBlocksNginx = `    # ---- Yurutme engeli: CGI / betik yorumlayicilari ----
     location ~* \.(cgi|pl|py|sh|rb|lua|fcgi)$ { deny all; }
     # ---- Yedek / dump / hassas dosya engeli ----
-    location ~* \.(sql|sql\.gz|bak|old|orig|save|swp|dump|tar|tgz|gz|zip|rar|7z|log|inc|php\.bak)$ { deny all; }
+    # NOT: MESRU arsivler (zip/gz/tar/tgz/tar.gz/rar/7z) + gzip'li sitemap (xml.gz)
+    # engellenMEZ. Sadece hassas dosyalar: gzip'li SQL dump (sql.gz) HARIC tutulur.
+    location ~* \.(sql|sql\.gz|bak|old|orig|save|swp|swo|dump|inc|log|php\.bak|php~|php\.save)$ { deny all; }
 `
 
 // buildSecurityHeaders: opts toggle'larina + SSL durumuna gore guvenlik add_header

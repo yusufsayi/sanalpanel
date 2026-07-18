@@ -35,11 +35,13 @@ var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — 
         <FilesMatch "\.(cgi|pl|py|sh|rb|lua|fcgi)$">
             Require all denied
         </FilesMatch>
-        # Yedek / dump / hassas dosya erisimini engelle (403)
-        <FilesMatch "\.(sql|bak|old|orig|save|swp|dump|tar|tgz|gz|zip|rar|7z|log|inc)$">
+        # Yedek / dump / hassas dosya erisimini engelle (403).
+        # NOT: MESRU arsivler (zip/gz/tar/tgz/rar/7z) engellenMEZ; gzip'li SQL dump
+        # (sql.gz) hassas oldugu icin HARIC tutulur (sitemap.xml.gz vb. serbest).
+        <FilesMatch "\.(sql|sql\.gz|bak|old|orig|save|swp|swo|dump|inc|log)$">
             Require all denied
         </FilesMatch>
-        <FilesMatch "\.php\.bak$">
+        <FilesMatch "\.(php\.bak|php~|php\.save)$">
             Require all denied
         </FilesMatch>
     </Directory>
