@@ -31,9 +31,13 @@ type Plan struct {
 	RAMMB              int    `json:"ram_mb"`      // hard limit MB
 	MaxProcess         int    `json:"max_process"` // TasksMax
 	InodeKota          int    `json:"inode_kota"`
-	IOAgirlik          int    `json:"io_agirlik"` // 1-1000 (systemd IOWeight)
+	IOAgirlik          int    `json:"io_agirlik"` // 1-1000 (systemd IOWeight — göreli öncelik)
 	MySQLMaxBaglanti   int    `json:"mysql_max_baglanti"`
 	PMMaxChildren      int    `json:"pm_max_children"` // PHP-FPM pm.max_children; 0 = otomatik max(4, ram_mb/64)
+	IOReadMBps         int    `json:"io_read_mbps"`    // mutlak disk okuma bant genişliği MB/s; 0 = sınırsız
+	IOWriteMBps        int    `json:"io_write_mbps"`   // mutlak disk yazma bant genişliği MB/s; 0 = sınırsız
+	IOReadIOPS         int    `json:"io_read_iops"`    // mutlak disk okuma IOPS; 0 = sınırsız
+	IOWriteIOPS        int    `json:"io_write_iops"`   // mutlak disk yazma IOPS; 0 = sınırsız
 	PHPSurum           string `json:"php_surum"`
 	FastCgiCache       bool   `json:"fastcgi_cache"`
 	ClientMaxBodyMB    int    `json:"client_max_body_mb"`
@@ -50,6 +54,7 @@ const selectAll = `SELECT id, ad, aciklama, disk_kota_mb, trafik_kota_mb,
   max_domain, max_db, max_email, max_ftp,
   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
   COALESCE(pm_max_children,0),
+  COALESCE(io_read_mbps,0), COALESCE(io_write_mbps,0), COALESCE(io_read_iops,0), COALESCE(io_write_iops,0),
   php_surum, fastcgi_cache, client_max_body_mb, COALESCE(nginx_ek_direktifler,''), varsayilan, DATE_FORMAT(created_at,'%Y-%m-%d') FROM service_plans`
 
 func b01(b bool) int {
@@ -66,6 +71,7 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 		&p.MaxDomain, &p.MaxDB, &p.MaxEmail, &p.MaxFTP,
 		&p.CPUYuzde, &p.RAMMB, &p.MaxProcess, &p.InodeKota, &p.IOAgirlik, &p.MySQLMaxBaglanti,
 		&p.PMMaxChildren,
+		&p.IOReadMBps, &p.IOWriteMBps, &p.IOReadIOPS, &p.IOWriteIOPS,
 		&p.PHPSurum, &fc, &p.ClientMaxBodyMB, &p.NginxEkDirektifler, &vars, &p.Olusturulma)
 	p.Varsayilan = vars == 1
 	p.FastCgiCache = fc == 1
@@ -166,12 +172,14 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		   max_domain, max_db, max_email, max_ftp,
 		   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
 		   pm_max_children,
+		   io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
 		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
+		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -210,12 +218,14 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		   max_domain=?, max_db=?, max_email=?, max_ftp=?,
 		   cpu_yuzde=?, ram_mb=?, max_process=?, inode_kota=?, io_agirlik=?, mysql_max_baglanti=?,
 		   pm_max_children=?,
+		   io_read_mbps=?, io_write_mbps=?, io_read_iops=?, io_write_iops=?,
 		   php_surum=?, fastcgi_cache=?, client_max_body_mb=?, nginx_ek_direktifler=?, varsayilan=?
 		 WHERE id=?`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
+		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

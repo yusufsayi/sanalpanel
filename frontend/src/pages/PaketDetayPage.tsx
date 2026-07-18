@@ -10,6 +10,7 @@ type Plan = {
   cpu_yuzde: number; ram_mb: number; max_process: number
   inode_kota: number; io_agirlik: number; mysql_max_baglanti: number
   pm_max_children: number
+  io_read_mbps: number; io_write_mbps: number; io_read_iops: number; io_write_iops: number
   php_surum: string
   fastcgi_cache: boolean; client_max_body_mb: number; nginx_ek_direktifler: string
   varsayilan: boolean; olusturulma: string
@@ -177,6 +178,21 @@ export default function PaketDetayPage() {
             </Alan>
             <Alan etiket="PHP-FPM max_children" ipucu="0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.">
               <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = Otomatik" />
+            </Alan>
+          </div>
+          <div className="mt-4 text-xs font-medium text-slate-500">Disk G/Ç (mutlak throttle — IOWeight'ten farklı; cgroup v2)</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            <Alan etiket="Disk Okuma (MB/s)" ipucu="Mutlak okuma bant genişliği. 0 = sınırsız">
+              <input type="number" min={0} value={plan.io_read_mbps} onChange={e => P('io_read_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+            <Alan etiket="Disk Yazma (MB/s)" ipucu="Mutlak yazma bant genişliği. 0 = sınırsız">
+              <input type="number" min={0} value={plan.io_write_mbps} onChange={e => P('io_write_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+            <Alan etiket="Okuma IOPS" ipucu="Saniyedeki maksimum okuma işlemi. 0 = sınırsız">
+              <input type="number" min={0} value={plan.io_read_iops} onChange={e => P('io_read_iops', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+            <Alan etiket="Yazma IOPS" ipucu="Saniyedeki maksimum yazma işlemi. 0 = sınırsız">
+              <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
             </Alan>
           </div>
         </Kart>

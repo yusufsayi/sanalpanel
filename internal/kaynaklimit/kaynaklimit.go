@@ -27,7 +27,15 @@ type Limitler struct {
 	MySQLMaxBaglanti int
 	DiskKotaMB       int
 	PMMaxChildren    int // 0 = otomatik türet (max(4, ram_mb/64))
+	IOReadMBps       int // mutlak disk okuma bant genişliği MB/s; 0 = sınırsız
+	IOWriteMBps      int // mutlak disk yazma bant genişliği MB/s; 0 = sınırsız
+	IOReadIOPS       int // mutlak disk okuma IOPS; 0 = sınırsız
+	IOWriteIOPS      int // mutlak disk yazma IOPS; 0 = sınırsız
 }
+
+// ioDevicePath: mutlak disk G/Ç limitlerinin uygulanacağı yol. systemd bunu otomatik
+// olarak tenant home'unu barındıran blok cihazına (major:minor) çözer (181/177: /home → /dev/vdaN).
+const ioDevicePath = "/home"
 
 // planLimitleriGetir: domain'in bağlı olduğu plan'ın limitlerini döner.
 // Plan atanmamışsa boş Limitler{0,...} — uygulama kaldırılır.
@@ -37,11 +45,14 @@ func PlanLimitleriGetir(ctx context.Context, db *sql.DB, domainID int64) (Limitl
 		SELECT COALESCE(p.cpu_yuzde,0), COALESCE(p.ram_mb,0),
 		       COALESCE(p.max_process,0), COALESCE(p.inode_kota,0),
 		       COALESCE(p.io_agirlik,100), COALESCE(p.mysql_max_baglanti,0),
-		       COALESCE(p.disk_kota_mb,0), COALESCE(p.pm_max_children,0)
+		       COALESCE(p.disk_kota_mb,0), COALESCE(p.pm_max_children,0),
+		       COALESCE(p.io_read_mbps,0), COALESCE(p.io_write_mbps,0),
+		       COALESCE(p.io_read_iops,0), COALESCE(p.io_write_iops,0)
 		FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
 		WHERE d.id=?`, domainID).
 		Scan(&l.CPUYuzde, &l.RAMMB, &l.MaxProcess, &l.InodeKota,
-			&l.IOAgirlik, &l.MySQLMaxBaglanti, &l.DiskKotaMB, &l.PMMaxChildren)
+			&l.IOAgirlik, &l.MySQLMaxBaglanti, &l.DiskKotaMB, &l.PMMaxChildren,
+			&l.IOReadMBps, &l.IOWriteMBps, &l.IOReadIOPS, &l.IOWriteIOPS)
 	return l, err
 }
 
@@ -57,7 +68,8 @@ func slicePath(sk string) string {
 }
 
 // SystemdSliceYaz: /etc/systemd/system/girginos-<sk>.slice dosyasını yazar.
-// CPUQuota, MemoryMax, TasksMax, IOWeight kural setini kullanır (cgroup v2).
+// CPUQuota, MemoryMax, TasksMax, IOWeight + (varsa) MUTLAK disk G/Ç throttle'ları
+// (IO{Read,Write}BandwidthMax / IO{Read,Write}IOPSMax) kural setini kullanır (cgroup v2).
 func SystemdSliceYaz(sk string, l Limitler) error {
 	content := fmt.Sprintf(`# GirginOSPanel per-domain resource slice — %s
 [Unit]
@@ -75,12 +87,13 @@ MemoryMax=%dM
 MemoryHigh=%dM
 TasksMax=%d
 IOWeight=%d
-`, sk, sk,
+%s`, sk, sk,
 		nonzero(l.CPUYuzde, 100),
 		nonzero(l.RAMMB, 512),
 		nonzero(l.RAMMB, 512)*90/100, // MemoryHigh = 90% of Max (soft throttle)
 		nonzero(l.MaxProcess, 50),
-		nonzero(l.IOAgirlik, 100))
+		nonzero(l.IOAgirlik, 100),
+		ioSliceLines(l))
 
 	if err := os.WriteFile(slicePath(sk), []byte(content), 0644); err != nil {
 		return fmt.Errorf("slice yaz: %w", err)
@@ -97,17 +110,112 @@ IOWeight=%d
 		mem := nonzero(l.RAMMB, 512)
 		tasks := nonzero(l.MaxProcess, 50)
 		io := nonzero(l.IOAgirlik, 100)
-		if out, err := exec.Command("systemctl", "set-property", "--runtime", sliceName(sk),
+		args := []string{"set-property", "--runtime", sliceName(sk),
 			fmt.Sprintf("CPUQuota=%d%%", cpu),
 			fmt.Sprintf("MemoryMax=%dM", mem),
 			fmt.Sprintf("MemoryHigh=%dM", mem*90/100),
 			fmt.Sprintf("TasksMax=%d", tasks),
 			fmt.Sprintf("IOWeight=%d", io),
-		).CombinedOutput(); err != nil {
+		}
+		// Mutlak disk G/Ç: >0 ise ayarla, 0 ise BOŞ atama ile temizle (>0→0 geçişi için ŞART).
+		args = append(args, ioSetPropertyArgs(l)...)
+		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
 			log.Printf("slice set-property %s: %s: %v", sk, strings.TrimSpace(string(out)), err)
 		}
+		// 🔴 systemd set-property BOŞ-atama (>0→0) yalnız systemd görünümünü sıfırlar;
+		// AKTİF cgroup'un io.max'ındaki mevcut cihaz limitini TEMİZLEMEZ (kernel eski
+		// wbps değerini tutar). 0'a düşen alanları kernel io.max'a "key=max" yazarak
+		// AKTİF olarak kaldır.
+		ioClearKernelLimits(sk, l)
 	}
 	return nil
+}
+
+// ioClearKernelLimits: aktif slice'ın cgroup io.max dosyasında, plan alanı 0 (sınırsız)
+// olan G/Ç anahtarlarını "max" yazarak kernel seviyesinde sıfırlar. systemd set-property
+// boş-atama bunu güvenilir yapmadığı için gerekir. >0 alanlara DOKUNMAZ.
+func ioClearKernelLimits(sk string, l Limitler) {
+	var clears []string
+	if l.IOReadMBps == 0 {
+		clears = append(clears, "rbps=max")
+	}
+	if l.IOWriteMBps == 0 {
+		clears = append(clears, "wbps=max")
+	}
+	if l.IOReadIOPS == 0 {
+		clears = append(clears, "riops=max")
+	}
+	if l.IOWriteIOPS == 0 {
+		clears = append(clears, "wiops=max")
+	}
+	if len(clears) == 0 {
+		return // tüm alanlar >0 → temizlenecek bir şey yok
+	}
+	cgOut, err := exec.Command("systemctl", "show", sliceName(sk), "-p", "ControlGroup", "--value").Output()
+	cg := strings.TrimSpace(string(cgOut))
+	if err != nil || cg == "" {
+		return
+	}
+	ioMaxPath := filepath.Join("/sys/fs/cgroup", cg, "io.max")
+	data, err := os.ReadFile(ioMaxPath)
+	if err != nil {
+		return
+	}
+	body := strings.TrimSpace(string(data))
+	if body == "" {
+		return // hiç aktif limit yok
+	}
+	suffix := " " + strings.Join(clears, " ")
+	for _, ln := range strings.Split(body, "\n") {
+		f := strings.Fields(ln)
+		if len(f) == 0 {
+			continue
+		}
+		// f[0] = "MAJ:MIN"; o cihaz için 0-alanları max yaz (>0 anahtarlar korunur).
+		_ = os.WriteFile(ioMaxPath, []byte(f[0]+suffix), 0644)
+	}
+}
+
+// ioSliceLines: slice dosyasına yazılacak mutlak disk G/Ç direktifleri (yalnız >0 alanlar).
+// 0 alanlar için satır YAZILMAZ (sınırsız). systemd yolu (ioDevicePath) blok cihaza çözer.
+func ioSliceLines(l Limitler) string {
+	var b strings.Builder
+	if l.IOReadMBps > 0 {
+		fmt.Fprintf(&b, "IOReadBandwidthMax=%s %dM\n", ioDevicePath, l.IOReadMBps)
+	}
+	if l.IOWriteMBps > 0 {
+		fmt.Fprintf(&b, "IOWriteBandwidthMax=%s %dM\n", ioDevicePath, l.IOWriteMBps)
+	}
+	if l.IOReadIOPS > 0 {
+		fmt.Fprintf(&b, "IOReadIOPSMax=%s %d\n", ioDevicePath, l.IOReadIOPS)
+	}
+	if l.IOWriteIOPS > 0 {
+		fmt.Fprintf(&b, "IOWriteIOPSMax=%s %d\n", ioDevicePath, l.IOWriteIOPS)
+	}
+	return b.String()
+}
+
+// ioSetPropertyArgs: canlı set-property için mutlak disk G/Ç argümanları. Alan >0 ise değeri;
+// 0 ise BOŞ atama ("IOWriteBandwidthMax=") → systemd o property'nin TÜM cihaz girdilerini
+// sıfırlar. >0→0 geçişinde limiti canlı kaldırmak için ŞART (dosyadan silmek tek başına
+// aktif cgroup'tan kaldırmaz).
+func ioSetPropertyArgs(l Limitler) []string {
+	// mbps=true → değer "N M" (bant genişliği); false → "N" (IOPS). n<=0 → boş atama (sıfırla).
+	arg := func(prop string, n int, mbps bool) string {
+		if n <= 0 {
+			return prop + "=" // boş → sıfırla
+		}
+		if mbps {
+			return fmt.Sprintf("%s=%s %dM", prop, ioDevicePath, n)
+		}
+		return fmt.Sprintf("%s=%s %d", prop, ioDevicePath, n)
+	}
+	return []string{
+		arg("IOReadBandwidthMax", l.IOReadMBps, true),
+		arg("IOWriteBandwidthMax", l.IOWriteMBps, true),
+		arg("IOReadIOPSMax", l.IOReadIOPS, false),
+		arg("IOWriteIOPSMax", l.IOWriteIOPS, false),
+	}
 }
 
 // SystemdSliceSil: kayıt varsa siler.
