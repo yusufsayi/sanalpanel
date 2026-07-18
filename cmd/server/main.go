@@ -31,6 +31,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/istatistik"
 	"girginospanel/internal/kaynak"
+	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/logs"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/monitor"
@@ -99,6 +100,15 @@ func main() {
 	if err := dns.HealZoneIncludes(context.Background(), d); err != nil {
 		log.Printf("dns zone-include heal warn: %v", err)
 	}
+	// Batch5A: mevcut planlı domain'leri per-tenant FPM'e (Seçenek A) ARKA PLANDA + GÜVENLE
+	// (baseline/post self-check + auto-rollback) migrate et. Panel her restart'ında
+	// (girginospanel-update) otomatik döner → mevcut-müşteri cutover'ı plan-driven tamamlanır.
+	// Boot'u bloklamaz (bg goroutine, kendi context'i).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		kaynaklimit.HealTenantFPM(ctx, d)
+	}()
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}

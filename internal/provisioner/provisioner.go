@@ -644,6 +644,15 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		opts.Backend = "php-fpm"
 	}
 
+	// 🔴 Per-tenant FPM (Seçenek A) aktifse socket'i DAİMA per-tenant socket'e zorla.
+	// renderAndReload TÜM vhost yazımlarının tek çıkış noktası → SSL-issue (EnableSelfSigned/
+	// EnableLetsEncrypt), SetPHPVersion, DisableSSL gibi bu fonksiyonu DOĞRUDAN çağıran
+	// (ApplyVhostForDomain guard'ını atlayan) yollar da doğru FPM'e bağlansın. Aksi halde
+	// per-tenant tenant'ta SSL vhost'u paylaşılan (taşınmış) socket'e işaret eder → 502.
+	if opts.Backend == "php-fpm" && TenantFPMActive(sk) {
+		opts.PHPSocket = tenantSocket(sk)
+	}
+
 	// Askıya-alma tutarlılığı: opts açıkça askıda demese bile DB'de bu kullanıcının
 	// domaini askıdaysa, HER render'ı 503 vhost'u olarak zorla. Bu sayede SetPHP/SSL/
 	// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).

@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/provisioner"
 )
@@ -262,4 +264,108 @@ func nonzero(v, def int) int {
 		return def
 	}
 	return v
+}
+
+// planProbeHTTPS: domain'in nginx :443 üzerinden sağlık kodu (Host header, cert
+// doğrulamasız). 0 = ulaşılamadı. Cutover öncesi/sonrası regresyon karşılaştırması için.
+func planProbeHTTPS(alanAdi string) int {
+	if alanAdi == "" {
+		return 0
+	}
+	out, _ := exec.Command("curl", "-sk", "--max-time", "10",
+		"-o", os.DevNull, "-w", "%{http_code}",
+		"-H", "Host: "+alanAdi, "https://127.0.0.1/").Output()
+	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return n
+}
+
+// servisAktif: systemd unit "active" mi.
+func servisAktif(unit string) bool {
+	out, _ := exec.Command("systemctl", "is-active", unit).CombinedOutput()
+	return strings.TrimSpace(string(out)) == "active"
+}
+
+// HealTenantFPM: TÜM planlı domain'leri per-tenant FPM'e (Seçenek A) GÜVENLE + plan-driven
+// migrate eder — mevcut (pre-Batch5A) müşterilerin cutover'ını otomatik tamamlar. Tenant
+// başına BULLETPROOF:
+//   - cutover ÖNCESİ baseline HTTP probe (nginx :443),
+//   - UygulaHepsi (slice + per-tenant FPM + pm.max_children + xfs + mysql),
+//   - cutover SONRASI probe,
+//   - 🔴 REGRESYON: servis inaktif VEYA (baseline 2xx-4xx iken post 5xx) → otomatik
+//     provisioner.RollbackToSharedFPM + slice sil → site paylaşılan düzende 200 kalır.
+//
+// İdempotent (migrate olanı atlar), SIRALI (thundering yok), ARKA PLANDA çağrılır
+// (panel boot'unu bloklamaz). girginospanel-update her panel restart'ında tetikler →
+// update için plan-driven cutover mekanizması. Plan atanmamış domain'e DOKUNMAZ.
+func HealTenantFPM(ctx context.Context, db *sql.DB) {
+	if db == nil {
+		return
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, sistem_kullanici, COALESCE(php_surum,'8.3'), alan_adi
+		 FROM domains WHERE plan_id IS NOT NULL ORDER BY id`)
+	if err != nil {
+		log.Printf("HealTenantFPM: domain listesi okunamadı: %v", err)
+		return
+	}
+	type dom struct {
+		id      int64
+		sk      string
+		php     string
+		alanAdi string
+	}
+	var list []dom
+	for rows.Next() {
+		var d dom
+		if e := rows.Scan(&d.id, &d.sk, &d.php, &d.alanAdi); e == nil {
+			list = append(list, d)
+		}
+	}
+	rows.Close()
+
+	var migrated, zaten, rollback int
+	for _, d := range list {
+		select {
+		case <-ctx.Done():
+			log.Printf("HealTenantFPM: iptal (ctx) — %d migrate/%d zaten/%d rollback", migrated, zaten, rollback)
+			return
+		default:
+		}
+		if d.sk == "" || !strings.HasPrefix(d.sk, "c_") {
+			continue
+		}
+		if provisioner.TenantFPMActive(d.sk) {
+			zaten++ // zaten migrate; provisioner.EnsureTenantFPMOnStartup ayakta tutar
+			continue
+		}
+		baseline := planProbeHTTPS(d.alanAdi)
+		// Tam plan-driven uygulama: slice + per-tenant FPM + pm.max_children + xfs + mysql.
+		if e := UygulaHepsi(ctx, db, d.id); e != nil {
+			log.Printf("HealTenantFPM: %s UygulaHepsi hata: %v", d.sk, e)
+		}
+		// EnableTenantFPM başarısızlıkta kendi içinde rollback etmiş olabilir → unit yoksa
+		// site zaten paylaşılan düzende (güvenli), bu tenant'ı atla.
+		if !provisioner.TenantFPMActive(d.sk) {
+			log.Printf("HealTenantFPM: %s cutover başarısız — paylaşılan düzende kaldı (güvenli)", d.sk)
+			continue
+		}
+		time.Sleep(700 * time.Millisecond) // FPM ısınsın + nginx reload otursun
+		aktif := servisAktif("php-fpm-" + d.sk + ".service")
+		post := planProbeHTTPS(d.alanAdi)
+		regresyon := baseline >= 200 && baseline < 500 && post >= 500
+		if !aktif || regresyon {
+			log.Printf("HealTenantFPM: %s REGRESYON (aktif=%v baseline=%d post=%d) → RollbackToSharedFPM",
+				d.sk, aktif, baseline, post)
+			if e := provisioner.RollbackToSharedFPM(db, d.id, d.sk, d.php); e != nil {
+				log.Printf("HealTenantFPM: %s rollback HATA: %v", d.sk, e)
+			}
+			_ = SystemdSliceSil(d.sk)
+			rollback++
+			continue
+		}
+		log.Printf("HealTenantFPM: %s cutover OK (baseline=%d post=%d)", d.sk, baseline, post)
+		migrated++
+	}
+	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif / %d rollback (toplam %d planlı domain)",
+		migrated, zaten, rollback, len(list))
 }
