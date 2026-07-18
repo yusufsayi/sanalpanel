@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// scopeDB: MusteriScope'un domain askıya-alma durumunu kontrol edebilmesi için DB
+// handle'ı. main() içinde middleware.Init(db) ile set edilir. nil ise askı kontrolü
+// atlanır (mc.DomainID eşleşmesi zaten şarttır; askı yalnızca EK bir kısıttır).
+var scopeDB *sql.DB
+
+// Init: middleware paketine DB handle'ı verir (müşteri-scope askı kontrolü için).
+func Init(db *sql.DB) { scopeDB = db }
 
 type ctxKey int
 
@@ -105,6 +114,17 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 			if urlID != mc.DomainID {
 				httpx.WriteError(w, http.StatusForbidden, "bu domain'e erişim yok")
 				return
+			}
+			// Askıya-alma zorlaması: askıdaki domain için müşteri token'ı (önceden
+			// verilmiş/hâlâ geçerli olsa bile) TÜM işlemlerde 403 alır. Admin bu
+			// bloktan önce (ClaimsFrom != nil) zaten geçmiştir; yönetici askıyı kaldırabilir.
+			if scopeDB != nil {
+				var askida int
+				if err := scopeDB.QueryRowContext(r.Context(),
+					`SELECT COALESCE(askida,0) FROM domains WHERE id=?`, mc.DomainID).Scan(&askida); err == nil && askida == 1 {
+					httpx.WriteError(w, http.StatusForbidden, "hesap askıya alınmış")
+					return
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

@@ -40,6 +40,7 @@ func Init(d *sql.DB) {
 	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
 	HealPanelVhostHeadersOnStartup()
 	HealVhostsOnStartup()
+	HealHomePerms() // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -724,7 +725,7 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 
 	dirs := []string{"public_html", "logs", "tmp", "ssl", ".cron"}
 	for _, d := range dirs {
-		_ = os.MkdirAll(filepath.Join(home, d), 0755)
+		_ = os.MkdirAll(filepath.Join(home, d), 0750)
 	}
 
 	uid, gid, err := uidGid(u)
@@ -735,18 +736,24 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 		})
 	}
 
-	_ = os.Chmod(home, 0711)
+	// public_html içeriği: dizinler 0750, dosyalar 0644 (nginx/php-fpm servis eder;
+	// komşu tenant ev dizini seviyesinde zaten engellidir).
 	_ = filepath.Walk(filepath.Join(home, "public_html"), func(p string, info os.FileInfo, _ error) error {
 		if info == nil {
 			return nil
 		}
 		if info.IsDir() {
-			_ = os.Chmod(p, 0755)
+			_ = os.Chmod(p, 0750)
 		} else {
 			_ = os.Chmod(p, 0644)
 		}
 		return nil
 	})
+
+	// 🔴 TENANT İZOLASYONU: komşu tenant'ın ev dizinini OKUYAMAMASI için "other"
+	// bitleri kaldırılır; nginx/php-fpm'in servis edebilmesi için ev dizini + public_html
+	// grubu 'nginx' yapılır. (open_basedir'e ek olarak OS seviyesinde çapraz-okuma engeli.)
+	hardenHomePerms(home, uid)
 
 	indexPath := filepath.Join(home, "public_html", "index.html")
 	_ = os.WriteFile(indexPath, []byte(welcomeHTML(alanAdi)), 0644)
@@ -975,6 +982,105 @@ func uidGid(u string) (int, int, error) {
 	uid, _ := strconv.Atoi(uu.Uid)
 	gid, _ := strconv.Atoi(uu.Gid)
 	return uid, gid, nil
+}
+
+// hardenHomePerms: tenant ev dizini + public_html için izolasyon izinlerini uygular.
+//
+//	home        = c_X:nginx 0710  → sahip tam; nginx grubu SADECE geçebilir (içerik
+//	                                listeleyemez); other (komşu tenant) = hiçbir şey.
+//	public_html = c_X:nginx 0750  → nginx okuyup servis eder; other = hiçbir şey.
+//
+// nginx grubu çözülemezse (kurulum farkı) fail-safe olarak eski davranışa (0711/0755,
+// izole ama nginx erişimli) döner — servisi asla kırmaz. İçeriğe DOKUNMAZ → O(1), idempotent.
+func hardenHomePerms(home string, uid int) {
+	ph := filepath.Join(home, "public_html")
+	if _, nginxGid, err := uidGid("nginx"); err == nil {
+		_ = os.Chown(home, uid, nginxGid)
+		_ = os.Chmod(home, 0o710)
+		_ = os.Chown(ph, uid, nginxGid)
+		_ = os.Chmod(ph, 0o750)
+		return
+	}
+	log.Printf("hardenHomePerms: 'nginx' grubu bulunamadı, fail-safe 0711/0755 uygulanıyor (%s)", home)
+	_ = os.Chmod(home, 0o711)
+	_ = os.Chmod(ph, 0o755)
+}
+
+// HealHomePerms: MEVCUT tüm tenant ev dizinlerine (retroaktif) izolasyon izinlerini
+// uygular. Yalnız iki dizinin sahip/mod'unu ayarlar (içeriği taramaz) → hızlı ve
+// idempotent; her boot'ta güvenle çalışır. Init içinde çağrılır.
+func HealHomePerms() {
+	if pkgDB == nil {
+		return
+	}
+	rows, err := pkgDB.Query(`SELECT DISTINCT sistem_kullanici FROM domains`)
+	if err != nil {
+		log.Printf("home-perms heal: sorgu: %v", err)
+		return
+	}
+	var sks []string
+	for rows.Next() {
+		var sk string
+		if rows.Scan(&sk) == nil && strings.HasPrefix(sk, "c_") {
+			sks = append(sks, sk)
+		}
+	}
+	_ = rows.Close()
+
+	n := 0
+	for _, sk := range sks {
+		home := "/home/" + sk
+		if fi, e := os.Stat(home); e != nil || !fi.IsDir() {
+			continue
+		}
+		uid, _, e := uidGid(sk)
+		if e != nil {
+			continue
+		}
+		hardenHomePerms(home, uid)
+		n++
+	}
+	if n > 0 {
+		log.Printf("home-perms heal: %d tenant ev dizini izolasyon izinleriyle güncellendi (home 0710 / public_html 0750, grp nginx)", n)
+	}
+}
+
+// SuspendUserRuntime: askıya alınan tenant'ın çalışan süreçlerini ve crontab'ını yönetir.
+//
+//	suspend=true  → crontab'ı cron spool'undan çıkar (crond çalıştırmaz) + tüm tenant
+//	                süreçlerini öldür (php-fpm worker, cron-spawn script).
+//	suspend=false → crontab'ı geri getir.
+//
+// c_ prefix ZORUNLU (sistem/root user'a asla dokunma). Best-effort.
+func SuspendUserRuntime(sk string, suspend bool) {
+	if !strings.HasPrefix(sk, "c_") {
+		return // güvenlik: yalnız tenant user
+	}
+	const suspendStore = "/var/lib/girginospanel/cron-suspended"
+	cronSpool := "/var/spool/cron/" + sk
+	stored := filepath.Join(suspendStore, sk)
+
+	if suspend {
+		if _, err := os.Stat(cronSpool); err == nil {
+			_ = os.MkdirAll(suspendStore, 0o700)
+			if err := os.Rename(cronSpool, stored); err != nil {
+				log.Printf("suspend runtime: crontab taşıma (%s): %v", sk, err)
+			}
+		}
+		// Tenant'ın çalışan tüm süreçlerini öldür (yalnız bu uid). Eşleşme yoksa
+		// pkill exit!=0 döner → yok say.
+		_, _ = exec.Command("pkill", "-KILL", "-u", sk).CombinedOutput()
+		return
+	}
+	if _, err := os.Stat(stored); err == nil {
+		_ = os.MkdirAll("/var/spool/cron", 0o700)
+		if err := os.Rename(stored, cronSpool); err != nil {
+			log.Printf("suspend runtime: crontab geri getirme (%s): %v", sk, err)
+			return
+		}
+		_ = os.Chmod(cronSpool, 0o600)
+		_, _ = exec.Command("restorecon", cronSpool).CombinedOutput()
+	}
 }
 
 func welcomeHTML(domain string) string {

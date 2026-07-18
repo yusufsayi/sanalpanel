@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -25,11 +26,11 @@ import (
 )
 
 type Surum struct {
-	Surum     string `json:"surum"`
-	PoolDir   string `json:"pool_dir"`
-	SockDir   string `json:"sock_dir"`
-	Service   string `json:"service"`
-	Aciklama  string `json:"aciklama"`
+	Surum    string `json:"surum"`
+	PoolDir  string `json:"pool_dir"`
+	SockDir  string `json:"sock_dir"`
+	Service  string `json:"service"`
+	Aciklama string `json:"aciklama"`
 }
 
 var KurulSurumler = []Surum{
@@ -234,7 +235,7 @@ php_admin_flag[file_uploads] = {{onoff .S.FileUploads}}
 php_admin_flag[short_open_tag] = {{onoff .S.ShortOpenTag}}
 php_admin_value[error_reporting] = {{.S.ErrorReporting}}
 php_admin_value[include_path] = {{.S.IncludePath}}
-{{if .S.OpenBasedir}}php_admin_value[open_basedir] = {{.S.OpenBasedir}}{{end}}
+php_admin_value[open_basedir] = {{if .S.OpenBasedir}}{{.S.OpenBasedir}}{{else}}/home/{{.SK}}/:/tmp/{{end}}
 {{if .S.MailForceExtraParameters}}php_admin_value[mail.force_extra_parameters] = {{.S.MailForceExtraParameters}}{{end}}
 php_admin_value[session.save_path] = {{if .S.SessionSavePath}}{{.S.SessionSavePath}}{{else}}/home/{{.SK}}/tmp{{end}}
 php_admin_value[upload_tmp_dir] = /home/{{.SK}}/tmp
@@ -287,6 +288,77 @@ func ApplyToFilesystem(sk, surum string, s Settings) (socket string, err error) 
 	}
 	socket = filepath.Join(sb.SockDir, sk+".sock")
 	return socket, nil
+}
+
+// ekDirektifSatirRe: ek_direktifler içinde YALNIZ 'php_value[anahtar]=' veya
+// 'php_flag[anahtar]=' satırlarına izin verir. php_admin_*, pool direktifleri
+// (user/group/listen/pm.*), [bölüm] başlıkları ve serbest metin reddedilir.
+var ekDirektifSatirRe = regexp.MustCompile(`^php_(?:value|flag)\[([a-zA-Z0-9_.]+)\]\s*=`)
+
+// ekDirektifYasakAnahtar: php_value ile bile ayarlanması tenant izolasyonunu
+// zayıflatabilecek anahtarlar (open_basedir'i genişletme, tmp/session yolunu
+// kaçırma, dosya/uzantı enjekte etme).
+var ekDirektifYasakAnahtar = map[string]bool{
+	"open_basedir": true, "disable_functions": true, "disable_classes": true,
+	"extension": true, "zend_extension": true,
+	"auto_prepend_file": true, "auto_append_file": true,
+	"error_log": true, "sys_temp_dir": true, "upload_tmp_dir": true,
+	"session.save_path": true, "mail.force_extra_parameters": true,
+	"curl.cainfo": true, "openssl.capath": true, "include_path": true,
+}
+
+// sanitizeEkDirektifler: kullanıcının serbest "ek direktifler" alanını pool'a
+// verbatim yazmadan önce satır-satır doğrular. Boş/yorum (;) satırlar korunur;
+// diğer her satır güvenli bir php_value/php_flag olmalı ve yasak anahtar
+// içermemeli. Böylece BEGIN_CUSTOM bloğu önceki php_admin_value sertleştirmesini
+// (open_basedir, disable_functions, user/group) EZEMEZ.
+func sanitizeEkDirektifler(raw string) (string, error) {
+	if strings.ContainsRune(raw, '\x00') {
+		return "", fmt.Errorf("ek direktiflerde geçersiz karakter (NUL)")
+	}
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	var temiz []string
+	for i, ln := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, ";") {
+			temiz = append(temiz, t)
+			continue
+		}
+		m := ekDirektifSatirRe.FindStringSubmatch(t)
+		if m == nil {
+			return "", fmt.Errorf("ek direktif satır %d: yalnızca 'php_value[...]=' / 'php_flag[...]=' izinli (php_admin_*, user/group, [bölüm] reddedildi)", i+1)
+		}
+		if ekDirektifYasakAnahtar[strings.ToLower(m[1])] {
+			return "", fmt.Errorf("ek direktif satır %d: '%s' anahtarı güvenlik nedeniyle yasak", i+1, m[1])
+		}
+		temiz = append(temiz, t)
+	}
+	return strings.Join(temiz, "\n"), nil
+}
+
+// validatePoolScalars: tek-satırlık string ayarlarına gömülü \n/\r ile pool'a yeni
+// (php_admin_value / user=...) satır enjekte edilmesini engeller — ek_direktifler
+// dışındaki alanlar da bir enjeksiyon yüzeyidir.
+func validatePoolScalars(s Settings) error {
+	alanlar := map[string]string{
+		"memory_limit":                s.MemoryLimit,
+		"post_max_size":               s.PostMaxSize,
+		"upload_max_filesize":         s.UploadMaxFilesize,
+		"disable_functions":           s.DisableFunctions,
+		"error_reporting":             s.ErrorReporting,
+		"include_path":                s.IncludePath,
+		"open_basedir":                s.OpenBasedir,
+		"session_save_path":           s.SessionSavePath,
+		"mail_force_extra_parameters": s.MailForceExtraParameters,
+		"pm_strategy":                 s.PMStrategy,
+	}
+	for k, v := range alanlar {
+		if strings.ContainsAny(v, "\r\n\x00") {
+			return fmt.Errorf("ayar '%s' satır sonu veya kontrol karakteri içeremez", k)
+		}
+	}
+	return nil
 }
 
 // ----- HTTP handlers -----
@@ -347,15 +419,19 @@ func (h *Handlers) GetAyarlar(w http.ResponseWriter, r *http.Request) {
 		"php_surum": surum,
 		"ayarlar":   s,
 		"moduller":  moduller,
-		"surumler":  func() []Surum {
+		"surumler": func() []Surum {
 			all := phpsurum.TumSurumler()
 			yuklu := []Surum{}
 			gorulen := map[string]bool{}
 			for _, ds := range all {
-				if !ds.Yuklu || gorulen[ds.Surum] { continue }
+				if !ds.Yuklu || gorulen[ds.Surum] {
+					continue
+				}
 				gorulen[ds.Surum] = true
 				ac := "Remi"
-				if ds.Kaynak == "appstream" { ac = "AppStream" }
+				if ds.Kaynak == "appstream" {
+					ac = "AppStream"
+				}
 				yuklu = append(yuklu, Surum{Surum: ds.Surum, PoolDir: ds.PoolDir, SockDir: ds.SockDir, Service: ds.Service, Aciklama: ac})
 			}
 			return yuklu
@@ -374,6 +450,19 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde: "+err.Error())
 		return
 	}
+
+	// Güvenlik: pool enjeksiyonunu engelle. Skaler alanlarda satır sonu reddedilir,
+	// ek_direktifler allowlist'ten geçirilir (php_admin_*/user/group/open_basedir → 400).
+	if err := validatePoolScalars(req.Ayarlar); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	temizEk, ekErr := sanitizeEkDirektifler(req.Ayarlar.EkDirektifler)
+	if ekErr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, ekErr.Error())
+		return
+	}
+	req.Ayarlar.EkDirektifler = temizEk
 
 	var sk, surum string
 	var demo int
@@ -456,4 +545,3 @@ func surumModulleri(surum string) []string {
 	}
 	return moduller
 }
-

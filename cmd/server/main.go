@@ -28,7 +28,6 @@ import (
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
 	"girginospanel/internal/guvenlikduvari"
-	"girginospanel/internal/redis"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/istatistik"
 	"girginospanel/internal/kaynak"
@@ -45,6 +44,7 @@ import (
 	"girginospanel/internal/plans"
 	"girginospanel/internal/pma"
 	"girginospanel/internal/provisioner"
+	"girginospanel/internal/redis"
 	"girginospanel/internal/sifrekoruma"
 	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
@@ -74,6 +74,7 @@ func main() {
 	runMigrations(d)
 
 	provisioner.Init(d) // askıya-alma tutarlılığı için provisioner'a DB handle'ı ver
+	middleware.Init(d)  // musteri-scope askiya-alma kontrolu icin DB handle
 
 	ipv4 := detectIPv4()
 	log.Printf("server ipv4: %s", ipv4)
@@ -349,8 +350,8 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	monitor.StartYukSampler(d, 60*time.Second)          // dashboard yük geçmişi örnekleyici
-	istatistik.StartTrafikAggregator(d, 5*time.Minute)  // per-domain aylık trafik toplayıcı
+	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
+	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
 	}

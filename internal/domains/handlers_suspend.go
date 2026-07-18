@@ -3,6 +3,7 @@ package domains
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -26,10 +27,10 @@ func (h *Handlers) AskidanAl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida bool) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var alanAdi string
+	var alanAdi, sk string
 	var isDemo int
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alan_adi, is_demo FROM domains WHERE id=?`, id).Scan(&alanAdi, &isDemo)
+		`SELECT alan_adi, sistem_kullanici, is_demo FROM domains WHERE id=?`, id).Scan(&alanAdi, &sk, &isDemo)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -62,6 +63,24 @@ func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida boo
 			`UPDATE domains SET askida=?, durum=? WHERE id=?`, 1-ak, map[bool]string{true: "aktif", false: "pasif"}[askida], id)
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+err.Error())
 		return
+	}
+
+	// FTP + panel-login kilidi: askıda => ftp_accounts.status='suspended'. Hem Pure-FTPd
+	// auth sorgusu hem musteri.Login "status='active'" şartı arar → askıdayken her ikisi
+	// de reddedilir. Askıdan alınca 'active'e döner.
+	ftpStatus := "active"
+	if askida {
+		ftpStatus = "suspended"
+	}
+	if _, e := h.DB.ExecContext(r.Context(),
+		`UPDATE ftp_accounts SET status=? WHERE domain_id=?`, ftpStatus, id); e != nil {
+		log.Printf("askiToggle: ftp_accounts status güncelleme (domain %d): %v", id, e)
+	}
+
+	// Çalışan tenant süreçlerini (php-fpm worker) durdur + crontab'ı devre dışı bırak /
+	// geri getir. Best-effort (birincil askı durumu DB + 503 vhost ile zaten uygulandı).
+	if sk != "" {
+		provisioner.SuspendUserRuntime(sk, askida)
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

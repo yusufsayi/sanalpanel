@@ -19,7 +19,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const MaxUploadBytes = 10 * 1024 * 1024 * 1024 // 100 MB
+// MaxUploadBytes: tek yükleme için üst sınır. Onceden 10 GiB idi ve ParseMultipartForm'a
+// maxMemory olarak veriliyordu → tek istekle 10 GiB RAM ayrilabiliyordu (DoS).
+const MaxUploadBytes = 2 * 1024 * 1024 * 1024 // 2 GiB
+
+// maxMultipartMemory: multipart ayrıştırmada RAM'de tutulacak azami tampon. Fazlası
+// otomatik olarak geçici diske taşar → büyük yüklemelerde RAM patlamaz.
+const maxMultipartMemory = 32 << 20 // 32 MiB
 
 type Handlers struct {
 	DB *sql.DB
@@ -54,11 +60,10 @@ var (
 	errEscape  = errors.New("güvenlik: ev dizini dışına çıkış engellendi")
 )
 
-
 type Entry struct {
 	Adi     string `json:"adi"`
-	Yol     string `json:"yol"`     // home'a goreceli (panel UI icin)
-	Tip     string `json:"tip"`     // "klasor" | "dosya" | "sembolik"
+	Yol     string `json:"yol"` // home'a goreceli (panel UI icin)
+	Tip     string `json:"tip"` // "klasor" | "dosya" | "sembolik"
 	BoyutB  int64  `json:"boyut_b"`
 	Mod     string `json:"mod"`     // "0644"
 	Degisme string `json:"degisme"` // RFC3339
@@ -114,9 +119,9 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	})
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"yol":      filepath.ToSlash(rel),
-		"icerik":   out,
-		"toplam":   len(out),
+		"yol":    filepath.ToSlash(rel),
+		"icerik": out,
+		"toplam": len(out),
 	})
 }
 
@@ -249,7 +254,16 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	if rel == "" {
 		rel = "/"
 	}
-	if err := r.ParseMultipartForm(MaxUploadBytes); err != nil {
+	// DoS savunması: istek gövdesini üst sınırla kes. MaxBytesReader hem RAM'i hem
+	// diski korur; sınır aşılınca okuma *http.MaxBytesError döner.
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBytes)
+	// maxMemory küçük → gövde RAM yerine geçici diske taşar (RAM DoS engellenir).
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) || strings.Contains(err.Error(), "too large") {
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "yükleme boyutu sınırı aştı (max 2 GiB)")
+			return
+		}
 		httpx.WriteError(w, http.StatusBadRequest, "form parse: "+err.Error())
 		return
 	}
@@ -260,7 +274,7 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	if fh.Size > MaxUploadBytes {
-		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "dosya çok büyük (max 100 MB)")
+		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "dosya çok büyük (max 2 GiB)")
 		return
 	}
 	abs, err := jailJoinStrict(home, filepath.Join(rel, fh.Filename))
@@ -282,10 +296,10 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	chown(abs, sk)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"ok":     true,
-		"yol":    filepath.ToSlash(filepath.Join(rel, fh.Filename)),
-		"boyut":  written,
-		"isim":   fh.Filename,
+		"ok":    true,
+		"yol":   filepath.ToSlash(filepath.Join(rel, fh.Filename)),
+		"boyut": written,
+		"isim":  fh.Filename,
 	})
 }
 
