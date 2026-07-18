@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/archivex"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -56,9 +57,19 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	tmpDir, _ := os.MkdirTemp("", "gosp-restore-*")
 	defer os.RemoveAll(tmpDir)
 
-	if out, err := exec.Command("tar", "xzf", abs, "-C", tmpDir).CombinedOutput(); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"tar extract: "+strings.TrimSpace(string(out)))
+	// GÜVENLİK: yedek arşivi ROOT olarak açılırsa, içindeki symlink üyeleri /root
+	// veya başka tenant'a yazma (jail-escape) vektörüdür. ORTAK güvenli-extract
+	// helper'ı kullan: (1) çıkarma tenant kullanıcısı (sk) olarak DAC altında,
+	// (2) üye-yolları önceden taranır, symlink/hardlink/jail-dışı üyeler reddedilir.
+	// tmpDir'i tenant'a devret ki tenant tar yazabilsin (arşiv root'ta okunup
+	// stdin'den akıtılır; tenant'ın yedek deposunu okumasına gerek yok).
+	_, _ = exec.Command("chown", sk+":"+sk, tmpDir).CombinedOutput()
+	if out, err := archivex.GuvenliCikar(abs, tmpDir, sk); err != nil {
+		msg := err.Error()
+		if strings.TrimSpace(out) != "" {
+			msg += ": " + strings.TrimSpace(out)
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, "tar extract: "+msg)
 		return
 	}
 
@@ -91,10 +102,10 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"alan_adi":   alanAdi,
-		"dosya":      dosya,
-		"db_import":  dbImport,
-		"uyari":      "Mevcut dosyalar üzerine yazıldı, DB tabloları yeniden oluşturuldu.",
+		"ok":        true,
+		"alan_adi":  alanAdi,
+		"dosya":     dosya,
+		"db_import": dbImport,
+		"uyari":     "Mevcut dosyalar üzerine yazıldı, DB tabloları yeniden oluşturuldu.",
 	})
 }

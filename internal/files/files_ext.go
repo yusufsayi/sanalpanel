@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
+	"girginospanel/internal/archivex"
 	"girginospanel/internal/httpx"
 )
 
@@ -229,52 +231,54 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "mkdir hedef: "+err.Error())
 		return
 	}
+	// GÜVENLİK: hedef dizini çıkarmadan ÖNCE tenant kullanıcısına devret ki
+	// çıkarma root DEĞİL, tenant olarak (DAC altında) çalışabilsin.
+	_, _ = exec.Command("chown", sk+":"+sk, hedefAbs).CombinedOutput()
 
 	low := strings.ToLower(abs)
-	var cmd *exec.Cmd
-	switch {
-	case strings.HasSuffix(low, ".zip"):
-		cmd = exec.Command("unzip", "-o", "-q", abs, "-d", hedefAbs)
-	case strings.HasSuffix(low, ".tar.gz") || strings.HasSuffix(low, ".tgz"):
-		cmd = exec.Command("tar", "-xzf", abs, "-C", hedefAbs)
-	case strings.HasSuffix(low, ".tar.bz2") || strings.HasSuffix(low, ".tbz2"):
-		cmd = exec.Command("tar", "-xjf", abs, "-C", hedefAbs)
-	case strings.HasSuffix(low, ".tar.xz") || strings.HasSuffix(low, ".txz"):
-		cmd = exec.Command("tar", "-xJf", abs, "-C", hedefAbs)
-	case strings.HasSuffix(low, ".tar"):
-		cmd = exec.Command("tar", "-xf", abs, "-C", hedefAbs)
-	case strings.HasSuffix(low, ".gz"):
-		// tek dosya gunzip
-		gzHedef := filepath.Join(hedefAbs, strings.TrimSuffix(filepath.Base(abs), ".gz"))
-		gzOut, gzErr := os.Create(gzHedef)
+	if strings.HasSuffix(low, ".gz") && archivex.TuruBelirle(low) == archivex.TurBilinmeyen {
+		// Tek dosyalık .gz: üye yolu yoktur; tek risk çıktı dosyasının symlink
+		// üzerinden dışarı yazması. jailJoinStrict + O_NOFOLLOW ile kapat.
+		rel := filepath.Join(hedef, strings.TrimSuffix(filepath.Base(abs), ".gz"))
+		gzHedef, jerr := jailJoinStrict(home, rel)
+		if jerr != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "gz hedef: "+jerr.Error())
+			return
+		}
+		// O_NOFOLLOW: gzHedef bir symlink ise ELi'ni takip etmeden hata ver.
+		gzOut, gzErr := os.OpenFile(gzHedef, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
 		if gzErr != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "gz hedef: "+gzErr.Error())
 			return
 		}
 		defer gzOut.Close()
+		var eb bytes.Buffer
 		gzc := exec.Command("gunzip", "-k", "-c", abs)
 		gzc.Stdout = gzOut
-		cmd = gzc
-	default:
-		httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz)")
-		return
-	}
-
-	var out []byte
-	if cmd.Stdout != nil {
-		var eb bytes.Buffer
-		cmd.Stderr = &eb
-		err = cmd.Run()
-		out = eb.Bytes()
+		gzc.Stderr = &eb
+		if runErr := gzc.Run(); runErr != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "extract: "+strings.TrimSpace(eb.String()))
+			return
+		}
 	} else {
-		out, err = cmd.CombinedOutput()
-	}
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "extract: "+strings.TrimSpace(string(out)))
-		return
+		// zip / tar ailesi: ORTAK güvenli-extract helper (çift savunma:
+		// tenant-user DAC + üye-yolu doğrulama, symlink/hardlink reddi).
+		tur := archivex.TuruBelirle(low)
+		if tur == archivex.TurBilinmeyen {
+			httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz)")
+			return
+		}
+		if out, exErr := archivex.GuvenliCikar(abs, hedefAbs, sk); exErr != nil {
+			msg := exErr.Error()
+			if strings.TrimSpace(out) != "" {
+				msg += ": " + strings.TrimSpace(out)
+			}
+			httpx.WriteError(w, http.StatusBadRequest, "extract: "+msg)
+			return
+		}
 	}
 
-	// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown
+	// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown (+ SELinux context).
 	_, _ = exec.Command("chown", "-R", sk+":"+sk, hedefAbs).CombinedOutput()
 	_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
 
