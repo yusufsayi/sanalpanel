@@ -141,10 +141,13 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.DB.ExecContext(r.Context(),
 		`UPDATE pma_tokens SET kullanildi=1 WHERE token=?`, req.Token)
 
+	// 🔴 host DAİMA localhost (socket). Cloud/GCP'de dış IP NIC'te yok → TCP hairpin/denied;
+	// ayrıca DB-user'lar @localhost (socket) kayıtlı → 127.0.0.1 (TCP) eşleşmez. pma-signon.php
+	// zaten localhost'a zorluyor; burada da tutarlı olsun (savunma-derinliği).
 	json.NewEncoder(w).Encode(map[string]any{
 		"kullanici": dbKul,
 		"parola":    dbPar,
 		"db":        dbAdi,
-		"host":      "127.0.0.1",
+		"host":      "localhost",
 	})
 }

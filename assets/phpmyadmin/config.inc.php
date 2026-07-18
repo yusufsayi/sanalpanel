@@ -11,7 +11,7 @@ $cfg['Servers'][$i]['auth_type']     = 'signon';
 $cfg['Servers'][$i]['SignonURL']     = '/pma-signon.php';
 $cfg['Servers'][$i]['SignonSession'] = 'pma_signon';
 $cfg['Servers'][$i]['LogoutURL']     = '/abonelikler';
-$cfg['Servers'][$i]['host']          = '127.0.0.1';
+$cfg['Servers'][$i]['host']          = 'localhost';
 $cfg['Servers'][$i]['compress']      = false;
 $cfg['Servers'][$i]['AllowNoPassword'] = false;
 

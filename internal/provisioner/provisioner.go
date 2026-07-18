@@ -39,6 +39,8 @@ func Init(d *sql.DB) {
 	// vhost/pool'larinin (retroaktif) guvenli yeniden-render'i. Her ikisi de
 	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
 	HealPanelVhostHeadersOnStartup()
+	HealPanelIndexNoCacheOnStartup() // Cloud-fix: panel SPA (index.html) no-cache → bayat UI önlenir
+	ensurePMAStartup()               // Cloud-fix: phpMyAdmin GCP/socket (pma-signon.php + token + pool socket + config host=localhost)
 	HealVhostsOnStartup()
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
@@ -173,12 +175,19 @@ type phpAyar struct {
 	FpmBin  string // "php-fpm -t" ile pool config'ini reload ONCESI dogrulamak icin
 }
 
+// phpMap: panelin YÖNETTİĞİ (pool yaz/sil, SetPHP döngüsü, socket çöz) PHP sürümleri.
+// 🔴 phpsurum.DesteklenenSurumler ile TUTARLI olmalı — eksik sürüm = split-brain: pool
+// relative-path'e yazılır / SetPHP/Deprovision o sürümü temizleyemez. AlmaLinux 10 Remi:
+// 7.4, 8.0-8.6 (5.6/7.0-7.3 EOL, Remi'de YOK). AppStream native = 8.3.
 var phpMap = map[string]phpAyar{
 	"7.4": {PoolDir: "/etc/opt/remi/php74/php-fpm.d", SockDir: "/var/opt/remi/php74/run/php-fpm", Service: "php74-php-fpm", FpmBin: "/opt/remi/php74/root/usr/sbin/php-fpm"},
+	"8.0": {PoolDir: "/etc/opt/remi/php80/php-fpm.d", SockDir: "/var/opt/remi/php80/run/php-fpm", Service: "php80-php-fpm", FpmBin: "/opt/remi/php80/root/usr/sbin/php-fpm"},
+	"8.1": {PoolDir: "/etc/opt/remi/php81/php-fpm.d", SockDir: "/var/opt/remi/php81/run/php-fpm", Service: "php81-php-fpm", FpmBin: "/opt/remi/php81/root/usr/sbin/php-fpm"},
 	"8.2": {PoolDir: "/etc/opt/remi/php82/php-fpm.d", SockDir: "/var/opt/remi/php82/run/php-fpm", Service: "php82-php-fpm", FpmBin: "/opt/remi/php82/root/usr/sbin/php-fpm"},
 	"8.3": {PoolDir: "/etc/php-fpm.d", SockDir: "/run/php-fpm", Service: "php-fpm", FpmBin: "/usr/sbin/php-fpm"},
 	"8.4": {PoolDir: "/etc/opt/remi/php84/php-fpm.d", SockDir: "/var/opt/remi/php84/run/php-fpm", Service: "php84-php-fpm", FpmBin: "/opt/remi/php84/root/usr/sbin/php-fpm"},
 	"8.5": {PoolDir: "/etc/opt/remi/php85/php-fpm.d", SockDir: "/var/opt/remi/php85/run/php-fpm", Service: "php85-php-fpm", FpmBin: "/opt/remi/php85/root/usr/sbin/php-fpm"},
+	"8.6": {PoolDir: "/etc/opt/remi/php86/php-fpm.d", SockDir: "/var/opt/remi/php86/run/php-fpm", Service: "php86-php-fpm", FpmBin: "/opt/remi/php86/root/usr/sbin/php-fpm"},
 }
 
 func ValidateDomain(d string) error {
@@ -763,10 +772,10 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 		return nil
 	})
 
-	// 🔴 TENANT İZOLASYONU: komşu tenant'ın ev dizinini OKUYAMAMASI için "other"
-	// bitleri kaldırılır; nginx/php-fpm'in servis edebilmesi için ev dizini + public_html
-	// grubu 'nginx' yapılır. (open_basedir'e ek olarak OS seviyesinde çapraz-okuma engeli.)
-	hardenHomePerms(home, uid)
+	// 🔴 TENANT İZOLASYONU (per-user ACL modeli — Plesk benzeri): dosyalar sitenin kendi
+	// kullanıcısında (c_X:c_X), other=none; nginx erişimi grup DEĞİL minimal user-ACL ile.
+	// (open_basedir'e ek olarak OS seviyesinde çapraz-okuma engeli + default-ACL kalıcılığı.)
+	hardenHomePerms(home, u, uid, gid)
 
 	indexPath := filepath.Join(home, "public_html", "index.html")
 	_ = os.WriteFile(indexPath, []byte(welcomeHTML(alanAdi)), 0644)
@@ -1110,26 +1119,76 @@ func uidGid(u string) (int, int, error) {
 	return uid, gid, nil
 }
 
-// hardenHomePerms: tenant ev dizini + public_html için izolasyon izinlerini uygular.
+// aclVar: POSIX ACL araçları (setfacl) kurulu mu? (installer/update `acl` paketini kurar.)
+func aclVar() bool {
+	_, err := exec.LookPath("setfacl")
+	return err == nil
+}
+
+// permsACLSentinel: MEVCUT sitelerin per-user ACL modeline (recursive) BİR KEZ dönüştürülmüş
+// olduğunu işaretler. Recursive setfacl O(dosya) olduğu için her boot'ta değil yalnız ilk
+// dönüşümde çalışır (default-ACL sayesinde sonraki dosyalar OTOMATİK miras alır → tekrar gereksiz).
+// Silinirse bir sonraki panel restart'ında recursive dönüşüm yeniden koşar (elle yeniden tetik).
+const permsACLSentinel = "/var/lib/girginospanel/.perms_acl_v1_done"
+
+// hardenHomePerms: tenant ev dizini + public_html için PER-USER (Plesk benzeri) izolasyon
+// izinlerini uygular. Dosyalar sitenin KENDİ kullanıcısındadır (c_X:c_X — grup nginx DEĞİL);
+// nginx erişimi grup üyeliğiyle değil MİNİMAL POSIX user-ACL ile verilir:
 //
-//	home        = c_X:nginx 0710  → sahip tam; nginx grubu SADECE geçebilir (içerik
-//	                                listeleyemez); other (komşu tenant) = hiçbir şey.
-//	public_html = c_X:nginx 0750  → nginx okuyup servis eder; other = hiçbir şey.
+//	home        = c_X:c_X 0710 + setfacl u:nginx:--x  → sahip tam; nginx yalnız TRAVERSE
+//	                                                     (içerik listeleyemez); other = hiçbir şey.
+//	public_html = c_X:c_X 0750 + setfacl u:nginx:rX (+DEFAULT ACL) → nginx okur/servis eder;
+//	                                                     other = hiçbir şey. DEFAULT ACL sayesinde
+//	                                                     yeni/upload/extract dosyalar u:nginx:rX'i
+//	                                                     OTOMATİK miras alır (her op'u hook'lamaya gerek yok).
 //
-// nginx grubu çözülemezse (kurulum farkı) fail-safe olarak eski davranışa (0711/0755,
-// izole ama nginx erişimli) döner — servisi asla kırmaz. İçeriğe DOKUNMAZ → O(1), idempotent.
-func hardenHomePerms(home string, uid int) {
+// 🔴 Neden per-user üstün: (1) dosya kendi kullanıcısında kalır (temiz, chown karmaşası yok),
+// (2) komşu tenant erişemez (other=none + home 0710), (3) nginx minimal ACL ile erişir,
+// (4) default-ACL kalıcıdır — file-manager chown'lasa bile ACL korunur. setfacl (recursive)
+// burada YALNIZ üst dizinlere uygulanır (O(1)); mevcut içeriğin toplu dönüşümü HealHomePerms'te
+// sentinel ile bir kez yapılır. acl yoksa fail-safe olarak eski grup=nginx modeline döner.
+func hardenHomePerms(home, sk string, uid, gid int) {
 	ph := filepath.Join(home, "public_html")
+	if aclVar() {
+		_ = os.Chown(home, uid, gid)
+		_ = os.Chmod(home, 0o710)
+		_ = os.Chown(ph, uid, gid)
+		_ = os.Chmod(ph, 0o750)
+		// home: nginx yalnız traverse edebilsin (list yok).
+		_, _ = exec.Command("setfacl", "-m", "u:nginx:--x", home).CombinedOutput()
+		// public_html: nginx oku+traverse (rX) + DEFAULT ACL (üst dizin) → yeni oluşturulan
+		// alt dizin/dosyalar u:nginx:rX'i miras alır. -R DEĞİL: mevcut içerik HealHomePerms
+		// (sentinel) tarafından tek seferde dönüştürülür; yeni site zaten boş.
+		_, _ = exec.Command("setfacl", "-m", "u:nginx:rX", ph).CombinedOutput()
+		_, _ = exec.Command("setfacl", "-d", "-m", "u:nginx:rX", ph).CombinedOutput()
+		return
+	}
+	// Fail-safe (acl yok): eski grup=nginx modeli — servis asla kırılmaz.
 	if _, nginxGid, err := uidGid("nginx"); err == nil {
+		log.Printf("hardenHomePerms: 'acl' yok, fail-safe grup=nginx modeli (%s)", home)
 		_ = os.Chown(home, uid, nginxGid)
 		_ = os.Chmod(home, 0o710)
 		_ = os.Chown(ph, uid, nginxGid)
 		_ = os.Chmod(ph, 0o750)
 		return
 	}
-	log.Printf("hardenHomePerms: 'nginx' grubu bulunamadı, fail-safe 0711/0755 uygulanıyor (%s)", home)
+	log.Printf("hardenHomePerms: 'acl' ve 'nginx' grubu yok, fail-safe 0711/0755 (%s)", home)
 	_ = os.Chmod(home, 0o711)
 	_ = os.Chmod(ph, 0o755)
+}
+
+// hardenHomePermsRecursive: MEVCUT public_html içeriğini per-user ACL modeline dönüştürür
+// (nginx okuma erişimi + default-ACL tüm alt dizinlere). O(dosya) — HealHomePerms'te sentinel
+// ile YALNIZ BİR KEZ çağrılır. Sonraki yeni dosyalar default-ACL'den miras alır.
+func hardenHomePermsRecursive(ph string) {
+	if !aclVar() {
+		return
+	}
+	if fi, e := os.Stat(ph); e != nil || !fi.IsDir() {
+		return
+	}
+	_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", ph).CombinedOutput()
+	_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", ph).CombinedOutput()
 }
 
 // HealHomePerms: MEVCUT tüm tenant ev dizinlerine (retroaktif) izolasyon izinlerini
@@ -1153,21 +1212,36 @@ func HealHomePerms() {
 	}
 	_ = rows.Close()
 
+	// Recursive ACL dönüşümü (mevcut içerik) yalnız BİR KEZ (sentinel yoksa) yapılır.
+	donustur := false
+	if _, e := os.Stat(permsACLSentinel); e != nil {
+		donustur = true
+	}
+
 	n := 0
 	for _, sk := range sks {
 		home := "/home/" + sk
 		if fi, e := os.Stat(home); e != nil || !fi.IsDir() {
 			continue
 		}
-		uid, _, e := uidGid(sk)
+		uid, gid, e := uidGid(sk)
 		if e != nil {
 			continue
 		}
-		hardenHomePerms(home, uid)
+		hardenHomePerms(home, sk, uid, gid) // üst dizin izinleri + ACL (her boot, O(1))
+		if donustur {
+			hardenHomePermsRecursive(filepath.Join(home, "public_html")) // mevcut içerik (bir kez)
+		}
 		n++
 	}
 	if n > 0 {
-		log.Printf("home-perms heal: %d tenant ev dizini izolasyon izinleriyle güncellendi (home 0710 / public_html 0750, grp nginx)", n)
+		log.Printf("home-perms heal: %d tenant ev dizini per-user izolasyon+ACL modeliyle güncellendi (home 0710 / public_html 0750, dosya c_*:c_*, nginx=user-ACL)", n)
+	}
+	if donustur && n > 0 {
+		_ = os.MkdirAll(filepath.Dir(permsACLSentinel), 0755)
+		if e := os.WriteFile(permsACLSentinel, []byte("done\n"), 0644); e != nil {
+			log.Printf("home-perms heal: sentinel yazılamadı (sonraki boot recursive ACL'i tekrar uygular): %v", e)
+		}
 	}
 }
 
@@ -1546,4 +1620,66 @@ func HealPanelVhostHeadersOnStartup() {
 		return
 	}
 	log.Printf("panel sec heal: guvenlik header'lari eklendi + nginx reload OK")
+}
+
+// panelIndexNoCacheSentinel: panel `location /` (SPA/index.html) bloguna no-cache
+// header'lari eklendiginde konan isaret. Idempotency icin.
+const panelIndexNoCacheSentinel = "# GOSP-PANEL-NOCACHE v1"
+
+// panelIndexLocRe: panel vhost'unun SPA fallback location'ini (index.html) yakalar.
+// Installer'in yazdigi kanonik bicim: `location / { try_files $uri $uri/ /index.html; }`.
+var panelIndexLocRe = regexp.MustCompile(`(?s)location / \{\s*try_files \$uri \$uri/ /index\.html;\s*\}`)
+
+// HealPanelIndexNoCacheOnStartup: panel React SPA'sinin index.html'ini (location /)
+// no-cache yapar → panel guncellendiginde tarayici BAYAT UI'yi (eski index.html →
+// eski hash'li asset referanslari) sunmaz. Hash'li /assets/ immutable KALIR (o blok
+// ayri). 🔴 add_header MIRAS SORUNU: bu location kendi add_header'ini tanimladigi an
+// server-seviyesi guvenlik header'larini DUSURUR → onlari da tekrar ekleriz.
+// nginx -t + rollback korumali; panel vhost yoksa (bu host'ta panel yok) sessiz gecer.
+func HealPanelIndexNoCacheOnStartup() {
+	orig, err := os.ReadFile(panelVhostPath)
+	if err != nil {
+		return // panel vhost yok — sessiz gec
+	}
+	s := string(orig)
+	if strings.Contains(s, panelIndexNoCacheSentinel) {
+		return // zaten uygulanmis
+	}
+	if !panelIndexLocRe.MatchString(s) {
+		log.Printf("panel no-cache heal: 'location /' (index.html) kanonik bicimde bulunamadi, atlandi")
+		return
+	}
+	yeniBlok := "location / {\n" +
+		"        " + panelIndexNoCacheSentinel + "\n" +
+		"        # SPA index.html HER ZAMAN taze (guncelleme sonrasi bayat UI onlenir).\n" +
+		"        add_header Cache-Control \"no-store, no-cache, must-revalidate, max-age=0\" always;\n" +
+		"        add_header Pragma \"no-cache\" always;\n" +
+		"        add_header Expires 0 always;\n" +
+		"        # Kendi add_header'i oldugu icin server-seviyesi guvenlik header'lari tekrar\n" +
+		"        add_header X-Content-Type-Options \"nosniff\" always;\n" +
+		"        add_header X-Frame-Options \"SAMEORIGIN\" always;\n" +
+		"        add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n" +
+		"        add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n" +
+		"        add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
+		"        add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n" +
+		"        try_files $uri $uri/ /index.html;\n" +
+		"    }"
+	newS := panelIndexLocRe.ReplaceAllString(s, yeniBlok)
+	if newS == s {
+		return
+	}
+	if e := os.WriteFile(panelVhostPath, []byte(newS), 0644); e != nil {
+		log.Printf("panel no-cache heal: yazilamadi: %v", e)
+		return
+	}
+	if out, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
+		_ = os.WriteFile(panelVhostPath, orig, 0644) // GERI YUKLE
+		log.Printf("panel no-cache heal: nginx -t basarisiz, geri alindi: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	if out, e := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); e != nil {
+		log.Printf("panel no-cache heal: nginx reload: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	log.Printf("panel no-cache heal: SPA index.html no-cache + guvenlik header'lari eklendi + nginx reload OK")
 }

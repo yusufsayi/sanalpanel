@@ -171,8 +171,16 @@ if [ -d "$A/ops" ]; then
   ok "ops-tool'lar güncellendi"
 fi
 
-# 10) izolasyon prereq (bubblewrap — eski kurulumlarda yoksa gelsin; idempotent) + SELinux context
+# 10) izolasyon + araç prereq (eski kurulumlarda yoksa gelsin; idempotent) + SELinux context
 command -v bwrap >/dev/null 2>&1 || dnf install -y bubblewrap >/dev/null 2>&1 || true
+# acl (setfacl): per-user dosya izin modeli (nginx user-ACL) için ŞART — yoksa panel fail-safe
+# grup=nginx moduna düşer. Idempotent.
+command -v setfacl >/dev/null 2>&1 || dnf install -y acl >/dev/null 2>&1 || true
+# RAR açıcı (dosya yöneticisi .rar extract): PRİMER bsdtar (libarchive, base repo, güvenilir
+# RAR/RAR5 + path-traversal reddeder). 7z (7-Zip 26.02) RAR codec içermez → kullanılmaz.
+if ! command -v bsdtar >/dev/null 2>&1 && ! command -v unar >/dev/null 2>&1 && ! command -v unrar >/dev/null 2>&1; then
+  dnf install -y bsdtar >/dev/null 2>&1 || dnf install -y unar >/dev/null 2>&1 || dnf install -y unrar >/dev/null 2>&1 || true
+fi
 command -v restorecon >/dev/null && restorecon -R "$PREFIX/bin" "$FDIST" >/dev/null 2>&1 || true
 
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)

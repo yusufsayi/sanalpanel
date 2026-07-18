@@ -44,8 +44,21 @@ step "2) Temel paketler"
 dnf install -y nginx httpd mariadb-server valkey certbot python3-certbot-nginx \
   clamav clamav-update httpd-tools mod_proxy_html tar openssl policycoreutils-python-utils \
   setools-console jq bind bind-utils nftables unzip zip cronie xfsprogs sudo \
-  bubblewrap rsync git curl >/dev/null 2>&1 \
-  && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, bubblewrap, araçlar" || die "temel paket kurulumu"
+  bubblewrap rsync git curl acl >/dev/null 2>&1 \
+  && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, bubblewrap, acl, araçlar" || die "temel paket kurulumu"
+
+# RAR açıcı (dosya yöneticisi .rar extract) — PRİMER: bsdtar (libarchive, appstream base'de
+# GÜVENİLİR RAR/RAR5 okur; kendisi de path-traversal reddeder). 🔴 NOT: AlmaLinux 10 default
+# `7z` (7-Zip 26.02) RAR codec İÇERMEZ → kullanılmaz. bsdtar yoksa unar/unrar fallback.
+if command -v bsdtar >/dev/null 2>&1 || command -v unar >/dev/null 2>&1 || command -v unrar >/dev/null 2>&1; then
+  ok "RAR açıcı mevcut ($(command -v bsdtar unar unrar 2>/dev/null | head -1))"
+elif dnf install -y bsdtar >/dev/null 2>&1; then
+  ok "bsdtar (libarchive — rar/rar5/zip/7z extract)"
+elif dnf install -y unar >/dev/null 2>&1 || dnf install -y unrar >/dev/null 2>&1; then
+  ok "unar/unrar (rar extract)"
+else
+  warn "RAR açıcı kurulamadı — dosya yöneticisi .rar extract devre dışı (zip/tar çalışır)"
+fi
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
@@ -155,6 +168,13 @@ SQL
   [ -f /opt/phpmyadmin/sql/create_tables.sql ] && mysql -u root phpmyadmin < /opt/phpmyadmin/sql/create_tables.sql 2>/dev/null
 fi
 [ -f "$A/phpmyadmin/pma-signon.php" ] && cp "$A/phpmyadmin/pma-signon.php" /opt/girginospanel/pma-signon/ 2>/dev/null
+# pma internal-auth token (pma-signon.php + panel API aynı dosyayı okur → rastgele değer eşleşir).
+# Yoksa üret (root:apache 0640 → pma FPM pool [apache] okur, başkası okuyamaz). Var olana dokunma.
+if [ ! -s /etc/girginospanel/pma-internal.token ]; then
+  openssl rand -hex 32 > /etc/girginospanel/pma-internal.token
+  chown root:apache /etc/girginospanel/pma-internal.token 2>/dev/null || true
+  chmod 640 /etc/girginospanel/pma-internal.token
+fi
 cp "$A/php-fpm/phpmyadmin.conf" /etc/php-fpm.d/phpmyadmin.conf
 mkdir -p /var/lib/phpmyadmin/{tmp,sessions}
 chown -R nginx:nginx /opt/phpmyadmin /var/lib/phpmyadmin 2>/dev/null

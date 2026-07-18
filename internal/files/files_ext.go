@@ -265,7 +265,7 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		// tenant-user DAC + üye-yolu doğrulama, symlink/hardlink reddi).
 		tur := archivex.TuruBelirle(low)
 		if tur == archivex.TurBilinmeyen {
-			httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz)")
+			httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz, rar)")
 			return
 		}
 		if out, exErr := archivex.GuvenliCikar(abs, hedefAbs, sk); exErr != nil {
@@ -281,6 +281,13 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown (+ SELinux context).
 	_, _ = exec.Command("chown", "-R", sk+":"+sk, hedefAbs).CombinedOutput()
 	_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
+	// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
+	// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.
+	// setfacl yoksa (acl paketi eksik) sessiz atlanır — dosyalar tenant'ta, site diğer yolla servis edilir.
+	if _, err := exec.LookPath("setfacl"); err == nil {
+		_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+		_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,

@@ -13,7 +13,19 @@ type Entry = {
   tip: 'klasor' | 'dosya' | 'sembolik'
   boyut_b: number
   mod: string
+  yetkiler?: string  // rwx dizesi: "rwxr-xr-x"
+  sahip?: string     // owner kullanıcı adı
+  grup?: string      // grup adı
   degisme: string
+}
+
+// docrootRel: dosyanın public_html (docroot) altındaki göreli yolunu döndürür; docroot
+// dışındaysa null (o dosyalar canlı URL'de erişilemez → "Tarayıcıda Aç" gösterilmez).
+function docrootRel(yol: string): string | null {
+  const pre = '/public_html'
+  if (yol === pre) return '/'
+  if (yol.startsWith(pre + '/')) return yol.slice(pre.length)
+  return null
 }
 
 type ListResp = { yol: string; icerik: Entry[]; toplam: number }
@@ -281,7 +293,7 @@ export default function DomainFilesPage() {
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
-      alert(apiHata(err, 'Açılamadı (zip/tar destek vardır)'))
+      alert(apiHata(err, 'Açılamadı (zip/tar/rar destek vardır)'))
     } finally {
       setExtractAktif(false)
     }
@@ -368,6 +380,14 @@ export default function DomainFilesPage() {
     const dt = e.dataTransfer
     if (!dt || dt.files.length === 0) return
     dosyalariYukle(Array.from(dt.files))
+  }
+
+  // Tarayıcıda Aç: dosyayı canlı public URL'inde yeni sekmede açar (yalnız docroot altı).
+  function tarayicidaAc(e: Entry) {
+    if (!domain) return
+    const rel = docrootRel(e.yol)
+    if (rel === null) return
+    window.open(`https://${domain.alan_adi}${rel}`, '_blank', 'noopener')
   }
 
   function indir(e: Entry) {
@@ -644,7 +664,9 @@ export default function DomainFilesPage() {
                 <th className="px-3 py-2.5 w-10 text-center"><input type="checkbox" checked={icerik.length > 0 && seciliSet.size === icerik.length} ref={ref => { if (ref) ref.indeterminate = seciliSet.size > 0 && seciliSet.size < icerik.length }} onChange={e => tumunuSec(e.target.checked)} className="cursor-pointer" /></th>
                 <th className="text-left px-4 py-2.5">Ad</th>
                 <th className="text-left px-4 py-2.5">Boyut</th>
-                <th className="text-left px-4 py-2.5">İzin</th>
+                <th className="text-left px-4 py-2.5">Yetkiler</th>
+                <th className="text-left px-4 py-2.5">Kullanıcı</th>
+                <th className="text-left px-4 py-2.5">Grup</th>
                 <th className="text-left px-4 py-2.5">Değişiklik</th>
                 <th className="text-right px-4 py-2.5">İşlemler</th>
               </tr>
@@ -652,14 +674,14 @@ export default function DomainFilesPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {yol !== '/' && (
                 <tr className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 cursor-pointer" onClick={geri}>
-                  <td className="px-4 py-2.5 text-sm" colSpan={6}>
+                  <td className="px-4 py-2.5 text-sm" colSpan={8}>
                     <span className="text-slate-500 dark:text-slate-500">↑ üst klasör</span>
                   </td>
                 </tr>
               )}
               {icerik.length === 0 && !yukleniyor && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400 dark:text-slate-500">Bu klasör boş</td>
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400 dark:text-slate-500">Bu klasör boş</td>
                 </tr>
               )}
               {(aramaSonuc ?? icerik).map((e) => (
@@ -693,9 +715,20 @@ export default function DomainFilesPage() {
                   <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">
                     {e.tip === 'klasor' ? '—' : formatBoyut(e.boyut_b)}
                   </td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.mod}</td>
+                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500" title={e.mod}>{e.yetkiler || e.mod}</td>
+                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.sahip || '—'}</td>
+                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.grup || '—'}</td>
                   <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatTarih(e.degisme)}</td>
                   <td className="px-4 py-2.5 text-right space-x-2">
+                    {e.tip !== 'klasor' && docrootRel(e.yol) !== null && (
+                      <button
+                        onClick={() => tarayicidaAc(e)}
+                        className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20 transition"
+                        title="Dosyayı canlı site adresinde (yeni sekme) aç"
+                      >
+                        Tarayıcıda Aç
+                      </button>
+                    )}
                     {e.tip !== 'klasor' && (
                       <button
                         onClick={() => indir(e)}
@@ -704,7 +737,7 @@ export default function DomainFilesPage() {
                         İndir
                       </button>
                     )}
-                    {e.tip === "dosya" && /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i.test(e.adi) && (
+                    {e.tip === "dosya" && /\.(zip|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i.test(e.adi) && (
                       <button
                         onClick={() => extractEt(e)}
                         disabled={extractAktif}

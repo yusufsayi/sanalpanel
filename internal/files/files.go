@@ -9,10 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 
 	"girginospanel/internal/httpx"
 
@@ -61,12 +64,57 @@ var (
 )
 
 type Entry struct {
-	Adi     string `json:"adi"`
-	Yol     string `json:"yol"` // home'a goreceli (panel UI icin)
-	Tip     string `json:"tip"` // "klasor" | "dosya" | "sembolik"
-	BoyutB  int64  `json:"boyut_b"`
-	Mod     string `json:"mod"`     // "0644"
-	Degisme string `json:"degisme"` // RFC3339
+	Adi      string `json:"adi"`
+	Yol      string `json:"yol"` // home'a goreceli (panel UI icin)
+	Tip      string `json:"tip"` // "klasor" | "dosya" | "sembolik"
+	BoyutB   int64  `json:"boyut_b"`
+	Mod      string `json:"mod"`      // "0644"
+	Yetkiler string `json:"yetkiler"` // rwx dizesi: "rwxr-xr-x"
+	Sahip    string `json:"sahip"`    // owner kullanıcı adı (uid çözülemezse sayı)
+	Grup     string `json:"grup"`     // grup adı (gid çözülemezse sayı)
+	Degisme  string `json:"degisme"`  // RFC3339
+}
+
+// uid/gid → isim çözüm cache'i (aynı user/grup tekrar tekrar lookup edilmesin).
+var (
+	uidAdiMu  sync.RWMutex
+	uidAdiMap = map[uint32]string{}
+	gidAdiMu  sync.RWMutex
+	gidAdiMap = map[uint32]string{}
+)
+
+func uidAdi(uid uint32) string {
+	uidAdiMu.RLock()
+	if v, ok := uidAdiMap[uid]; ok {
+		uidAdiMu.RUnlock()
+		return v
+	}
+	uidAdiMu.RUnlock()
+	ad := strconv.FormatUint(uint64(uid), 10)
+	if u, err := user.LookupId(ad); err == nil && u.Username != "" {
+		ad = u.Username
+	}
+	uidAdiMu.Lock()
+	uidAdiMap[uid] = ad
+	uidAdiMu.Unlock()
+	return ad
+}
+
+func gidAdi(gid uint32) string {
+	gidAdiMu.RLock()
+	if v, ok := gidAdiMap[gid]; ok {
+		gidAdiMu.RUnlock()
+		return v
+	}
+	gidAdiMu.RUnlock()
+	ad := strconv.FormatUint(uint64(gid), 10)
+	if g, err := user.LookupGroupId(ad); err == nil && g.Name != "" {
+		ad = g.Name
+	}
+	gidAdiMu.Lock()
+	gidAdiMap[gid] = ad
+	gidAdiMu.Unlock()
+	return ad
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +149,22 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		} else if info.Mode()&os.ModeSymlink != 0 {
 			tip = "sembolik"
 		}
+		// Sahip / grup (Linux): FileInfo.Sys() → *syscall.Stat_t. Çözülemezse "-".
+		sahip, grup := "-", "-"
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			sahip = uidAdi(st.Uid)
+			grup = gidAdi(st.Gid)
+		}
 		out = append(out, Entry{
-			Adi:     e.Name(),
-			Yol:     filepath.ToSlash(filepath.Join(rel, e.Name())),
-			Tip:     tip,
-			BoyutB:  info.Size(),
-			Mod:     "0" + strconv.FormatInt(int64(info.Mode().Perm()), 8),
-			Degisme: info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+			Adi:      e.Name(),
+			Yol:      filepath.ToSlash(filepath.Join(rel, e.Name())),
+			Tip:      tip,
+			BoyutB:   info.Size(),
+			Mod:      "0" + strconv.FormatInt(int64(info.Mode().Perm()), 8),
+			Yetkiler: yetkiRWX(info.Mode()),
+			Sahip:    sahip,
+			Grup:     grup,
+			Degisme:  info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	// klasörler önce, sonra alfabetik
@@ -301,6 +358,19 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 		"boyut": written,
 		"isim":  fh.Filename,
 	})
+}
+
+// yetkiRWX: izin bitlerini rwx dizesine çevirir (ör. 0644 → "rw-r--r--").
+func yetkiRWX(m os.FileMode) string {
+	const rwx = "rwxrwxrwx"
+	p := m.Perm()
+	b := []byte("---------")
+	for i := 0; i < 9; i++ {
+		if p&(1<<uint(8-i)) != 0 {
+			b[i] = rwx[i]
+		}
+	}
+	return string(b)
 }
 
 func statusFromErr(err error) int {

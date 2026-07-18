@@ -29,9 +29,11 @@ import (
 
 // Güvenlik hataları.
 var (
-	// ErrDesteklenmeyen: bu ortak helper üye-tabanlı arşivleri (zip/tar ailesi) çıkarır;
+	// ErrDesteklenmeyen: bu ortak helper üye-tabanlı arşivleri (zip/tar ailesi/rar) çıkarır;
 	// tek dosyalık .gz çağıran tarafından ayrı ele alınır.
-	ErrDesteklenmeyen = errors.New("desteklenmeyen arşiv formatı (zip, tar, tar.gz/tgz, tar.bz2, tar.xz)")
+	ErrDesteklenmeyen = errors.New("desteklenmeyen arşiv formatı (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, rar)")
+	// ErrRarAraciYok: .rar için sistemde açıcı (7z/unar/unrar) kurulu değil.
+	ErrRarAraciYok = errors.New("güvenlik: sunucuda RAR açıcı (7z/unar/unrar) kurulu değil — .rar açılamıyor")
 	// ErrUyeJailDisi: arşiv üyesi mutlak yol / ".." ile jail dışına çıkmaya çalışıyor.
 	ErrUyeJailDisi = errors.New("güvenlik: arşiv üyesi ev dizini (jail) dışına çıkıyor — reddedildi")
 	// ErrUyeSymlink: arşivde symlink/hardlink/aygıt üyesi var (jail-escape vektörü) — reddedildi.
@@ -48,6 +50,7 @@ const (
 	TurTarGz
 	TurTarBz2
 	TurTarXz
+	TurRar
 )
 
 // TuruBelirle: dosya adının uzantısından arşiv türünü döndürür (küçük harfe duyarsız).
@@ -64,6 +67,8 @@ func TuruBelirle(ad string) Tur {
 		return TurTarXz
 	case strings.HasSuffix(low, ".tar"):
 		return TurTar
+	case strings.HasSuffix(low, ".rar"):
+		return TurRar
 	}
 	return TurBilinmeyen
 }
@@ -96,9 +101,105 @@ func Tara(archivePath string, tur Tur) error {
 		return zipTara(archivePath)
 	case TurTar, TurTarGz, TurTarBz2, TurTarXz:
 		return tarTara(archivePath, tur)
+	case TurRar:
+		return rarTara(archivePath)
 	default:
 		return ErrDesteklenmeyen
 	}
+}
+
+// rarAraclari: RAR açmak için tercih sırasıyla denenecek araçlar.
+//
+//	bsdtar (libarchive) — PRİMER: AlmaLinux 10 base/appstream'de var, RAR/RAR5 güvenilir okur,
+//	  temiz listeler (-tf), üstelik kendisi de ".." ve mutlak yolu REDDEDER (ekstra savunma).
+//	unar/unrar — fallback.
+//
+// 🔴 NOT: `7z` (AlmaLinux 10 default = 7-Zip 26.02) RAR codec içermez ("Cannot open the file
+// as archive") ve p7zip 7zip paketiyle çakışır → 7z LİSTEDE YOK. bsdtar en güvenilir seçim.
+var rarAraclari = []string{"bsdtar", "unar", "unrar"}
+
+// rarAraci: sistemde kurulu ilk RAR açıcıyı (tercih sırasıyla) döndürür.
+func rarAraci() (string, bool) {
+	for _, t := range rarAraclari {
+		if _, err := exec.LookPath(t); err == nil {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+// rarUyeAdlari: seçilen araçla arşivdeki üye ADLARINI listeler (Katman 2 ön-taraması için).
+func rarUyeAdlari(tool, archivePath string) ([]string, error) {
+	var names []string
+	switch tool {
+	case "bsdtar":
+		// -tf: üye adları, satır başına bir tane (temiz).
+		out, err := exec.Command("bsdtar", "-tf", archivePath).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("rar liste (bsdtar): %s", strings.TrimSpace(string(out)))
+		}
+		for _, ln := range strings.Split(string(out), "\n") {
+			if s := strings.TrimRight(ln, "\r"); strings.TrimSpace(s) != "" {
+				names = append(names, s)
+			}
+		}
+	case "unar":
+		// lsar: ilk satır "archive.rar: RAR" başlığı; sonraki satırlar üyeler.
+		out, err := exec.Command("lsar", archivePath).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("rar liste (lsar): %s", strings.TrimSpace(string(out)))
+		}
+		lines := strings.Split(string(out), "\n")
+		for i, ln := range lines {
+			s := strings.TrimSpace(ln)
+			if i == 0 || s == "" {
+				continue
+			}
+			names = append(names, s)
+		}
+	case "unrar":
+		// unrar-free çıktısı gürültülü (banner + tablo başlığı). Yalnız üye satırlarını süz:
+		// başlık/ayraç/banner olmayan, dosya-yolu gibi görünen satırları al.
+		out, err := exec.Command("unrar", "lb", archivePath).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("rar liste (unrar): %s", strings.TrimSpace(string(out)))
+		}
+		for _, ln := range strings.Split(string(out), "\n") {
+			s := strings.TrimSpace(ln)
+			if s == "" || strings.HasPrefix(s, "unrar") || strings.HasPrefix(s, "RAR archive") ||
+				strings.HasPrefix(s, "Pathname") || strings.HasPrefix(s, "Size") ||
+				strings.HasPrefix(s, "Copyright") || strings.HasPrefix(s, "----") ||
+				strings.HasPrefix(s, "Extracting") || strings.HasPrefix(s, "All OK") {
+				continue
+			}
+			names = append(names, s)
+		}
+	default:
+		return nil, ErrRarAraciYok
+	}
+	return names, nil
+}
+
+// rarTara: RAR üyelerini araç yardımıyla ÖN-TARAR. zip/tar için Go-stdlib pre-scan'in
+// karşılığı: mutlak yol / ".." içeren üyeler REDDEDİLİR (ErrUyeJailDisi). Sembolik-bağlantı
+// gerçek koruması Katman 1 (tenant-user DAC) tarafından sağlanır: RAR bir symlink içerse
+// bile çıkarma tenant kimliğinde ve tenant'ın KENDİ home'una yapılır — komşu tenant'a/sisteme
+// yazamaz (0710 home + DAC). Ayrıca primer araç bsdtar ".."/mutlak yolu KENDİSİ de reddeder.
+func rarTara(archivePath string) error {
+	tool, ok := rarAraci()
+	if !ok {
+		return ErrRarAraciYok
+	}
+	names, err := rarUyeAdlari(tool, archivePath)
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		if uyeAdiTehlikeli(n) {
+			return ErrUyeJailDisi
+		}
+	}
+	return nil
 }
 
 func zipTara(archivePath string) error {
@@ -214,6 +315,23 @@ func GuvenliCikar(archivePath, destDir, sk string) (string, error) {
 	case TurZip:
 		// unzip stdin okuyamaz; arşiv sk-okunur olmalı (tenant home'undaki dosya).
 		cmd = runuserKomut(sk, "unzip", "-o", "-q", archivePath, "-d", destDir)
+	case TurRar:
+		// RAR: seçilen açıcıyı tenant kimliğinde çalıştır (tam-yol koru, üzerine yaz).
+		tool, ok := rarAraci()
+		if !ok {
+			return "", ErrRarAraciYok
+		}
+		switch tool {
+		case "bsdtar":
+			// libarchive: RAR/RAR5 okur, -C hedef; kendisi de ".."/mutlak yolu reddeder.
+			cmd = runuserKomut(sk, "bsdtar", "-x", "-f", archivePath, "-C", destDir)
+		case "unar":
+			// -f: üzerine yaz, -D: kapsayıcı dizin oluşturma, -o: hedef.
+			cmd = runuserKomut(sk, "unar", "-f", "-D", "-o", destDir, archivePath)
+		default: // unrar
+			// x: tam-yol çıkar, -o+: üzerine yaz, hedef sonuna / şart.
+			cmd = runuserKomut(sk, "unrar", "x", "-o+", archivePath, destDir+"/")
+		}
 	default:
 		// tar ailesi: root arşivi açar, baytlar tenant tar'a stdin'den akar.
 		f, err := os.Open(archivePath)

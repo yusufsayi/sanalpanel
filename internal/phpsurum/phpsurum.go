@@ -12,18 +12,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/httpx"
 )
 
-// Tum desteklenen Remi PHP surumleri + AppStream PHP 8.3
+// DesteklenenSurumler: panelin sunduğu PHP sürümleri. 🔴 5.6/7.0-7.3 EOL ve AlmaLinux 10
+// Remi'de SAĞLANMAZ → listeden ÇIKARILDI (aksi halde "dnf No match for argument: php73-php-fpm").
+// AlmaLinux 10 Remi'nin gerçekten sağladığı: 7.4, 8.0-8.6 (8.6 alpha) + AppStream native 8.3.
+// Gerçek kurulabilirlik ayrıca RUNTIME'da dnf ile doğrulanır (Kurulabilir alanı, cache'li) →
+// bir sürüm OS'tan kalkarsa panel zarif biçimde "kurulamaz" gösterir, ham dnf hatası patlamaz.
 var DesteklenenSurumler = []SurumMeta{
-	{"5.6", "56", "remi"},
-	{"7.0", "70", "remi"},
-	{"7.1", "71", "remi"},
-	{"7.2", "72", "remi"},
-	{"7.3", "73", "remi"},
 	{"7.4", "74", "remi"},
 	{"8.0", "80", "remi"},
 	{"8.1", "81", "remi"},
@@ -32,6 +32,7 @@ var DesteklenenSurumler = []SurumMeta{
 	{"8.3", "83", "remi"},
 	{"8.4", "84", "remi"},
 	{"8.5", "85", "remi"},
+	{"8.6", "86", "remi"},
 }
 
 type SurumMeta struct {
@@ -43,6 +44,7 @@ type SurumMeta struct {
 type Surum struct {
 	SurumMeta
 	Yuklu       bool   `json:"yuklu"`
+	Kurulabilir bool   `json:"kurulabilir"` // dnf'te (Remi/AppStream) mevcut mu — cache'li
 	PoolDir     string `json:"pool_dir,omitempty"`
 	SockDir     string `json:"sock_dir,omitempty"`
 	Service     string `json:"service,omitempty"`
@@ -50,6 +52,41 @@ type Surum struct {
 	GercekSurum string `json:"gercek_surum,omitempty"` // örn "8.3.31"
 	ModulSayi   int    `json:"modul_sayi,omitempty"`
 	Aciklama    string `json:"aciklama,omitempty"`
+}
+
+// ---- Kurulabilirlik cache'i (dnf sorgusu pahalı; TTL ile önbelleğe alınır) ----
+var (
+	availMu    sync.Mutex
+	availCache = map[string]bool{}
+	availAt    time.Time
+)
+
+const availTTL = 10 * time.Minute
+
+// paketMevcut: phpXX-php-fpm paketi bu OS'ta (Remi) kurulabilir/kurulu mu? AppStream daima var.
+// Sonuç 10 dk cache'lenir (aynı sürüm tekrar tekrar dnf sorgulamasın).
+func paketMevcut(m SurumMeta) bool {
+	if m.Kaynak == "appstream" {
+		return true // sistem default her zaman mevcut
+	}
+	pkg := "php" + m.Kod + "-php-fpm"
+	availMu.Lock()
+	defer availMu.Unlock()
+	if time.Since(availAt) >= availTTL {
+		availCache = map[string]bool{}
+		availAt = time.Now()
+	}
+	if v, ok := availCache[pkg]; ok {
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// installed VEYA available → bulunursa dnf exit 0. (--available kurulu olanı göstermez,
+	// bu yüzden ikisini de deneriz.)
+	mevcut := exec.CommandContext(ctx, "dnf", "-q", "list", "--available", pkg).Run() == nil ||
+		exec.CommandContext(ctx, "dnf", "-q", "list", "--installed", pkg).Run() == nil
+	availCache[pkg] = mevcut
+	return mevcut
 }
 
 // Yollar(meta): yuklenmis olsa olsa nerede olur
@@ -97,6 +134,8 @@ func Discover(m SurumMeta) Surum {
 	} else {
 		s.Aciklama = "Remi modular — geliştirme/test/legacy"
 	}
+	// Kurulabilirlik: yüklüyse zaten kurulabilir; değilse dnf'e sor (cache'li).
+	s.Kurulabilir = s.Yuklu || paketMevcut(m)
 	return s
 }
 
@@ -161,6 +200,28 @@ func PaketAdlari(m SurumMeta) []string {
 	return out
 }
 
+// dnfHataOzet: dnf çıktısından anlamlı son satır(lar)ı süzer (tüm ham dökümü değil).
+// "No match for argument" / "Error:" satırlarını öne çıkarır; hiçbiri yoksa son satır.
+func dnfHataOzet(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var son string
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		son = ln
+		low := strings.ToLower(ln)
+		if strings.Contains(low, "no match") || strings.HasPrefix(low, "error") || strings.Contains(low, "nothing provides") {
+			return ln
+		}
+	}
+	if son == "" {
+		return "bilinmeyen dnf hatası"
+	}
+	return son
+}
+
 // ----- HTTP -----
 
 type Handlers struct {
@@ -196,6 +257,14 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Zarif ön-kontrol: sürüm bu OS'ta (Remi) gerçekten sağlanıyor mu? EOL/kalkmış sürümlerde
+	// ham "dnf No match for argument" dökümü yerine anlaşılır mesaj döneriz.
+	if !paketMevcut(m) {
+		httpx.WriteError(w, http.StatusConflict,
+			fmt.Sprintf("PHP %s bu işletim sisteminde sağlanmıyor (Remi deposunda yok — büyük olasılıkla EOL). Kurulabilir bir sürüm seçin.", req.Surum))
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 	defer cancel()
 	args := append([]string{"install", "-y"}, PaketAdlari(m)...)
@@ -203,7 +272,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"dnf install: "+strings.TrimSpace(string(out)))
+			"PHP "+req.Surum+" kurulamadı: "+dnfHataOzet(string(out)))
 		return
 	}
 
@@ -287,7 +356,7 @@ func (h *Handlers) Kaldir(w http.ResponseWriter, r *http.Request) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"dnf remove: "+strings.TrimSpace(string(out)))
+			"PHP "+req.Surum+" kaldırılamadı: "+dnfHataOzet(string(out)))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
