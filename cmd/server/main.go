@@ -109,6 +109,9 @@ func main() {
 		defer cancel()
 		kaynaklimit.HealTenantFPM(ctx, d)
 	}()
+	// Batch5A: MySQL Governor yavaş-sorgu watchdog (plan db_max_query_seconds>0 olan tenant
+	// DB-kullanıcılarının eşik-aşan sorgularını KILL eder). Panel ömrü boyunca bg çalışır.
+	go kaynaklimit.SlowQueryWatchdog(context.Background(), d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}

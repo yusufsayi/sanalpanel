@@ -11,6 +11,7 @@ type Plan = {
   inode_kota: number; io_agirlik: number; mysql_max_baglanti: number
   pm_max_children: number
   io_read_mbps: number; io_write_mbps: number; io_read_iops: number; io_write_iops: number
+  db_max_queries_per_hour: number; db_max_updates_per_hour: number; db_max_query_seconds: number
   php_surum: string
   fastcgi_cache: boolean; client_max_body_mb: number; nginx_ek_direktifler: string
   varsayilan: boolean; olusturulma: string
@@ -193,6 +194,18 @@ export default function PaketDetayPage() {
             </Alan>
             <Alan etiket="Yazma IOPS" ipucu="Saniyedeki maksimum yazma işlemi. 0 = sınırsız">
               <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+          </div>
+          <div className="mt-4 text-xs font-medium text-slate-500">Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            <Alan etiket="Maks. Sorgu/Saat" ipucu="MAX_QUERIES_PER_HOUR. 0 = sınırsız">
+              <input type="number" min={0} value={plan.db_max_queries_per_hour} onChange={e => P('db_max_queries_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+            <Alan etiket="Maks. Güncelleme/Saat" ipucu="MAX_UPDATES_PER_HOUR. 0 = sınırsız">
+              <input type="number" min={0} value={plan.db_max_updates_per_hour} onChange={e => P('db_max_updates_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
+            </Alan>
+            <Alan etiket="Maks. Sorgu Süresi (sn)" ipucu="Bu süreyi aşan sorgu KILL edilir (watchdog). 0 = öldürme yok">
+              <input type="number" min={0} value={plan.db_max_query_seconds} onChange={e => P('db_max_query_seconds', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = sınırsız" />
             </Alan>
           </div>
         </Kart>

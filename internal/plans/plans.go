@@ -33,11 +33,14 @@ type Plan struct {
 	InodeKota          int    `json:"inode_kota"`
 	IOAgirlik          int    `json:"io_agirlik"` // 1-1000 (systemd IOWeight — göreli öncelik)
 	MySQLMaxBaglanti   int    `json:"mysql_max_baglanti"`
-	PMMaxChildren      int    `json:"pm_max_children"` // PHP-FPM pm.max_children; 0 = otomatik max(4, ram_mb/64)
-	IOReadMBps         int    `json:"io_read_mbps"`    // mutlak disk okuma bant genişliği MB/s; 0 = sınırsız
-	IOWriteMBps        int    `json:"io_write_mbps"`   // mutlak disk yazma bant genişliği MB/s; 0 = sınırsız
-	IOReadIOPS         int    `json:"io_read_iops"`    // mutlak disk okuma IOPS; 0 = sınırsız
-	IOWriteIOPS        int    `json:"io_write_iops"`   // mutlak disk yazma IOPS; 0 = sınırsız
+	PMMaxChildren      int    `json:"pm_max_children"`         // PHP-FPM pm.max_children; 0 = otomatik max(4, ram_mb/64)
+	IOReadMBps         int    `json:"io_read_mbps"`            // mutlak disk okuma bant genişliği MB/s; 0 = sınırsız
+	IOWriteMBps        int    `json:"io_write_mbps"`           // mutlak disk yazma bant genişliği MB/s; 0 = sınırsız
+	IOReadIOPS         int    `json:"io_read_iops"`            // mutlak disk okuma IOPS; 0 = sınırsız
+	IOWriteIOPS        int    `json:"io_write_iops"`           // mutlak disk yazma IOPS; 0 = sınırsız
+	DBMaxQueriesPerHr  int    `json:"db_max_queries_per_hour"` // MySQL MAX_QUERIES_PER_HOUR; 0 = sınırsız
+	DBMaxUpdatesPerHr  int    `json:"db_max_updates_per_hour"` // MySQL MAX_UPDATES_PER_HOUR; 0 = sınırsız
+	DBMaxQuerySeconds  int    `json:"db_max_query_seconds"`    // yavaş-sorgu KILL eşiği (sn); 0 = öldürme yok
 	PHPSurum           string `json:"php_surum"`
 	FastCgiCache       bool   `json:"fastcgi_cache"`
 	ClientMaxBodyMB    int    `json:"client_max_body_mb"`
@@ -55,6 +58,7 @@ const selectAll = `SELECT id, ad, aciklama, disk_kota_mb, trafik_kota_mb,
   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
   COALESCE(pm_max_children,0),
   COALESCE(io_read_mbps,0), COALESCE(io_write_mbps,0), COALESCE(io_read_iops,0), COALESCE(io_write_iops,0),
+  COALESCE(db_max_queries_per_hour,0), COALESCE(db_max_updates_per_hour,0), COALESCE(db_max_query_seconds,0),
   php_surum, fastcgi_cache, client_max_body_mb, COALESCE(nginx_ek_direktifler,''), varsayilan, DATE_FORMAT(created_at,'%Y-%m-%d') FROM service_plans`
 
 func b01(b bool) int {
@@ -72,6 +76,7 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 		&p.CPUYuzde, &p.RAMMB, &p.MaxProcess, &p.InodeKota, &p.IOAgirlik, &p.MySQLMaxBaglanti,
 		&p.PMMaxChildren,
 		&p.IOReadMBps, &p.IOWriteMBps, &p.IOReadIOPS, &p.IOWriteIOPS,
+		&p.DBMaxQueriesPerHr, &p.DBMaxUpdatesPerHr, &p.DBMaxQuerySeconds,
 		&p.PHPSurum, &fc, &p.ClientMaxBodyMB, &p.NginxEkDirektifler, &vars, &p.Olusturulma)
 	p.Varsayilan = vars == 1
 	p.FastCgiCache = fc == 1
@@ -173,13 +178,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
 		   pm_max_children,
 		   io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
+		   db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
 		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
+		p.DBMaxQueriesPerHr, p.DBMaxUpdatesPerHr, p.DBMaxQuerySeconds,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -219,6 +226,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		   cpu_yuzde=?, ram_mb=?, max_process=?, inode_kota=?, io_agirlik=?, mysql_max_baglanti=?,
 		   pm_max_children=?,
 		   io_read_mbps=?, io_write_mbps=?, io_read_iops=?, io_write_iops=?,
+		   db_max_queries_per_hour=?, db_max_updates_per_hour=?, db_max_query_seconds=?,
 		   php_surum=?, fastcgi_cache=?, client_max_body_mb=?, nginx_ek_direktifler=?, varsayilan=?
 		 WHERE id=?`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
@@ -226,6 +234,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
+		p.DBMaxQueriesPerHr, p.DBMaxUpdatesPerHr, p.DBMaxQuerySeconds,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

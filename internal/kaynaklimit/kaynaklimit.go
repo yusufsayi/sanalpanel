@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,10 @@ type Limitler struct {
 	IOWriteMBps      int // mutlak disk yazma bant genişliği MB/s; 0 = sınırsız
 	IOReadIOPS       int // mutlak disk okuma IOPS; 0 = sınırsız
 	IOWriteIOPS      int // mutlak disk yazma IOPS; 0 = sınırsız
+	// MySQL Governor (native MariaDB kaynak limitleri; 0 = sınırsız)
+	DBMaxQueriesPerHr int // MAX_QUERIES_PER_HOUR
+	DBMaxUpdatesPerHr int // MAX_UPDATES_PER_HOUR
+	DBMaxQuerySeconds int // yavaş-sorgu watchdog KILL eşiği (sn); 0 = öldürme yok
 }
 
 // ioDevicePath: mutlak disk G/Ç limitlerinin uygulanacağı yol. systemd bunu otomatik
@@ -47,12 +52,15 @@ func PlanLimitleriGetir(ctx context.Context, db *sql.DB, domainID int64) (Limitl
 		       COALESCE(p.io_agirlik,100), COALESCE(p.mysql_max_baglanti,0),
 		       COALESCE(p.disk_kota_mb,0), COALESCE(p.pm_max_children,0),
 		       COALESCE(p.io_read_mbps,0), COALESCE(p.io_write_mbps,0),
-		       COALESCE(p.io_read_iops,0), COALESCE(p.io_write_iops,0)
+		       COALESCE(p.io_read_iops,0), COALESCE(p.io_write_iops,0),
+		       COALESCE(p.db_max_queries_per_hour,0), COALESCE(p.db_max_updates_per_hour,0),
+		       COALESCE(p.db_max_query_seconds,0)
 		FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
 		WHERE d.id=?`, domainID).
 		Scan(&l.CPUYuzde, &l.RAMMB, &l.MaxProcess, &l.InodeKota,
 			&l.IOAgirlik, &l.MySQLMaxBaglanti, &l.DiskKotaMB, &l.PMMaxChildren,
-			&l.IOReadMBps, &l.IOWriteMBps, &l.IOReadIOPS, &l.IOWriteIOPS)
+			&l.IOReadMBps, &l.IOWriteMBps, &l.IOReadIOPS, &l.IOWriteIOPS,
+			&l.DBMaxQueriesPerHr, &l.DBMaxUpdatesPerHr, &l.DBMaxQuerySeconds)
 	return l, err
 }
 
@@ -296,29 +304,152 @@ func XFSKotaUygula(sk string, l Limitler) error {
 	return nil
 }
 
-// MySQLLimitUygula: DB kullanıcısına GRANT ... WITH MAX_USER_CONNECTIONS
-func MySQLLimitUygula(sk string, l Limitler, mysqlDBUser string) error {
-	if l.MySQLMaxBaglanti <= 0 {
+// reGovernorUser: MySQL kullanıcı adı allowlist'i (backtick/tırnak/boşluk yok → SQLi kapalı).
+var reGovernorUser = regexp.MustCompile(`^[A-Za-z0-9_]{1,32}$`)
+
+// reGovernorHost: MySQL host allowlist'i (localhost / IP / % / hostname).
+var reGovernorHost = regexp.MustCompile(`^[A-Za-z0-9_.%\-]{1,64}$`)
+
+// dbGovernorSystemUsers: ASLA dokunulmayacak sistem/panel/replikasyon kullanıcıları.
+// (db_accounts'ta zaten olmamalılar; bu ikinci savunma katmanı.)
+var dbGovernorSystemUsers = map[string]bool{
+	"root": true, "mysql": true, "mariadb.sys": true, "panel": true,
+	"event_scheduler": true, "debian-sys-maint": true, "replication": true,
+	"repl": true, "healthcheck": true, "": true,
+}
+
+// dbGovernorUserAtlanir: kullanıcı adı güvenli/tenant kullanıcısı değilse true (dokunma).
+func dbGovernorUserAtlanir(user string) bool {
+	return !reGovernorUser.MatchString(user) || dbGovernorSystemUsers[strings.ToLower(user)]
+}
+
+// MySQLLimitUygula: domain'in db_accounts'undaki HER DB-kullanıcısına native MariaDB
+// kaynak limitlerini (MAX_USER_CONNECTIONS / MAX_QUERIES_PER_HOUR / MAX_UPDATES_PER_HOUR)
+// uygular. 0 = sınırsız (MariaDB'de 0 = limit yok). Yalnız o tenant'ın db_accounts
+// kullanıcılarına dokunur; root/panel/sistem kullanıcılarına ASLA (allowlist + regex → SQLi yok).
+func MySQLLimitUygula(ctx context.Context, db *sql.DB, domainID int64, l Limitler) error {
+	rows, err := db.QueryContext(ctx,
+		`SELECT db_user, COALESCE(db_host,'localhost') FROM db_accounts WHERE domain_id=?`, domainID)
+	if err != nil {
+		return err
+	}
+	type acct struct{ user, host string }
+	var accts []acct
+	for rows.Next() {
+		var a acct
+		if e := rows.Scan(&a.user, &a.host); e == nil {
+			accts = append(accts, a)
+		}
+	}
+	rows.Close()
+
+	var stmts []string
+	for _, a := range accts {
+		if dbGovernorUserAtlanir(a.user) {
+			log.Printf("governor: DB kullanıcısı atlandı (allowlist dışı): %q", a.user)
+			continue
+		}
+		host := a.host
+		if !reGovernorHost.MatchString(host) {
+			host = "localhost" // güvenli varsayılan (enjeksiyon engeli)
+		}
+		stmts = append(stmts, fmt.Sprintf(
+			"ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d MAX_QUERIES_PER_HOUR %d MAX_UPDATES_PER_HOUR %d;",
+			a.user, host,
+			nonNeg(l.MySQLMaxBaglanti), nonNeg(l.DBMaxQueriesPerHr), nonNeg(l.DBMaxUpdatesPerHr)))
+	}
+	if len(stmts) == 0 {
 		return nil
 	}
-	sqlCmd := fmt.Sprintf(
-		"GRANT USAGE ON *.* TO '%s'@'localhost' WITH MAX_USER_CONNECTIONS %d;FLUSH PRIVILEGES;",
-		mysqlDBUser, l.MySQLMaxBaglanti)
-	cmd := exec.Command("mysql", "-uroot", "-e", sqlCmd)
+	stmts = append(stmts, "FLUSH USER_RESOURCES;")
+	cmd := exec.CommandContext(ctx, "mysql", "-uroot", "-e", strings.Join(stmts, ""))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql limit: %s: %w", strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("mysql governor: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+func nonNeg(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// governorPollInterval: yavaş-sorgu watchdog tarama aralığı. Kısa tutulur çünkü küçük bir
+// db_max_query_seconds eşiği (ör. 3sn) ancak eşikten kısa aralıkla güvenilir yakalanır
+// (30sn aralık 3sn'lik bir limiti kaçırırdı). Yük çok düşük (aralıkta tek processlist okuması).
+const governorPollInterval = 5 * time.Second
+
+// SlowQueryWatchdog: MySQL Governor yavaş-sorgu bekçisi. Periyodik olarak processlist'i
+// tarar; bir tenant DB-kullanıcısının çalışan sorgusu planındaki db_max_query_seconds'ı
+// aşarsa KILL QUERY ile öldürür. root/panel/sistem kullanıcılarına DOKUNMAZ (yalnız
+// db_accounts'ta bulunan + plan limiti >0 olan kullanıcılar). Panel açılışında bg başlatılır.
+func SlowQueryWatchdog(ctx context.Context, db *sql.DB) {
+	if db == nil {
+		return
+	}
+	t := time.NewTicker(governorPollInterval)
+	defer t.Stop()
+	log.Printf("MySQL Governor: yavaş-sorgu watchdog başladı (%s tarama aralığı)", governorPollInterval)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			governorScanOnce(db)
+		}
+	}
+}
+
+// governorScanOnce: tek tarama. root ile processlist okur (panel DB-kullanıcısı
+// PROCESS/CONNECTION ADMIN'e sahip olmayabilir), limiti aşan tenant sorgularını öldürür.
+func governorScanOnce(db *sql.DB) {
+	out, err := exec.Command("mysql", "-uroot", "-N", "-B", "-e",
+		"SELECT ID,USER,TIME FROM information_schema.PROCESSLIST WHERE COMMAND<>'Sleep' AND TIME>0").Output()
+	if err != nil {
+		return
+	}
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ln == "" {
+			continue
+		}
+		f := strings.Split(ln, "\t")
+		if len(f) < 3 {
+			continue
+		}
+		id, e1 := strconv.Atoi(strings.TrimSpace(f[0]))
+		user := strings.TrimSpace(f[1])
+		secs, e2 := strconv.Atoi(strings.TrimSpace(f[2]))
+		if e1 != nil || e2 != nil || secs <= 0 || dbGovernorUserAtlanir(user) {
+			continue
+		}
+		// user → db_accounts → domain → plan.db_max_query_seconds (db_user UNIQUE → tek satır).
+		var limit int
+		qerr := db.QueryRow(
+			`SELECT COALESCE(p.db_max_query_seconds,0)
+			 FROM db_accounts a JOIN domains d ON d.id=a.domain_id
+			 LEFT JOIN service_plans p ON p.id=d.plan_id
+			 WHERE a.db_user=? LIMIT 1`, user).Scan(&limit)
+		if qerr != nil || limit <= 0 || secs <= limit {
+			continue // db_accounts'ta değil / limit yok / henüz aşmadı
+		}
+		if kout, kerr := exec.Command("mysql", "-uroot", "-e", fmt.Sprintf("KILL QUERY %d", id)).CombinedOutput(); kerr != nil {
+			log.Printf("Governor: %s KILL başarısız (id=%d): %s: %v", user, id, strings.TrimSpace(string(kout)), kerr)
+		} else {
+			log.Printf("Governor: %s sorgusu %ds > %ds → KILL (id=%d)", user, secs, limit, id)
+		}
+	}
 }
 
 // UygulaHepsi: bir domain için plan'a göre TÜM limitleri uygular:
 // slice (cgroup) + per-tenant FPM (Seçenek A, gerçek enforcement + CageFS izolasyon) +
 // pm.max_children (plandan) + xfs + mysql.
 func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
-	var sk, dbUser, surum string
+	var sk, surum string
 	if err := db.QueryRowContext(ctx,
-		`SELECT sistem_kullanici, COALESCE(db_user,''), COALESCE(php_surum,'8.3') FROM domains WHERE id=?`, domainID).
-		Scan(&sk, &dbUser, &surum); err != nil {
+		`SELECT sistem_kullanici, COALESCE(php_surum,'8.3') FROM domains WHERE id=?`, domainID).
+		Scan(&sk, &surum); err != nil {
 		return err
 	}
 	if sk == "" {
@@ -355,14 +486,13 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if _, err := provisioner.EnableTenantFPM(db, domainID, sk, surum); err != nil {
 		log.Printf("per-tenant fpm %s: %v (paylaşılan düzende kalındı)", sk, err)
 	}
-	// 4) disk kotası (xfs) + MySQL bağlantı limiti.
+	// 4) disk kotası (xfs) + MySQL Governor (domain'in TÜM db_accounts kullanıcılarına
+	//    native GRANT limitleri: bağlantı + sorgu/saat + güncelleme/saat).
 	if err := XFSKotaUygula(sk, l); err != nil {
 		log.Printf("xfs quota %s: %v", sk, err)
 	}
-	if dbUser != "" {
-		if err := MySQLLimitUygula(sk, l, dbUser); err != nil {
-			log.Printf("mysql limit %s: %v", sk, err)
-		}
+	if err := MySQLLimitUygula(ctx, db, domainID, l); err != nil {
+		log.Printf("mysql governor %s: %v", sk, err)
 	}
 	return nil
 }
