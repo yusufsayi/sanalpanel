@@ -26,9 +26,43 @@ func RandomParola(n int) string {
 
 var reDBKimlik = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
+// reDBSonek: musteri-verdigi DB/kullanici SONEKI (panel `<sk>_` onekini kendisi ekler).
+// Yalniz kucuk harf/rakam/alt-cizgi, 1-32 karakter. Onek eklendikten sonra toplam <=64
+// olmasi ayrica GecerliDBKimlik ile dogrulanir.
+var reDBSonek = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
 // GecerliDBKimlik: MySQL identifier (db/kullanici adi) guvenli mi? backtick/tirnak/bosluk yok => SQLi kapali
 func GecerliDBKimlik(s string) bool {
 	return reDBKimlik.MatchString(s)
+}
+
+// GecerliDBSonek: musteri sonek girdisi guvenli mi? (onek eklemeden ONCE dogrulanir)
+func GecerliDBSonek(s string) bool {
+	return reDBSonek.MatchString(s)
+}
+
+// ParolaGucluMu: musteri DB parolasi yeterince guclu mu? >=12 karakter + karisik
+// (en az bir harf ve bir rakam) + tek satir. UI'de gosterilmek uzere Turkce neden dondurur.
+func ParolaGucluMu(pw string) (bool, string) {
+	if !ParolaGecerli(pw) {
+		return false, "parola geçersiz karakter (satır sonu/kontrol) içeriyor"
+	}
+	if len([]rune(pw)) < 12 {
+		return false, "parola en az 12 karakter olmalı"
+	}
+	var harf, rakam bool
+	for _, r := range pw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			harf = true
+		case r >= '0' && r <= '9':
+			rakam = true
+		}
+	}
+	if !harf || !rakam {
+		return false, "parola harf ve rakam içermeli (karışık)"
+	}
+	return true, ""
 }
 
 // MusteriDBKimlikGecerli: musteri-verdigi ad guvenli VE domain kullanicisiyla namespaced mi?
@@ -102,6 +136,36 @@ func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) er
 	return err
 }
 
+// MySQLCreateDBForUser: yeni DB olustur + MEVCUT bir DB-kullanicisina GRANT ver
+// (kullanicinin parolasina DOKUNMAZ — baska DB'leri bozmaz). db_accounts'a bu domain+db
+// icin mevcut kullanicinin parolasiyla (db_pass_plain) yeni satir ekler.
+// Cagiran, dbUser'in bu domaine ait oldugunu ONCEDEN dogrulamalidir (sahiplik + onek).
+func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) error {
+	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
+	}
+	// Mevcut kullanicinin parolasi (yeni db_accounts satiri icin — phpMyAdmin SSO).
+	var pass string
+	if err := db.QueryRow(
+		`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbUser).Scan(&pass); err != nil {
+		return fmt.Errorf("mevcut kullanıcı parolası bulunamadı: %w", err)
+	}
+	// DB olustur + mevcut kullaniciya GRANT (CREATE/ALTER USER YOK → parola korunur).
+	stmts := []string{
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
+		"FLUSH PRIVILEGES;",
+	}
+	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
+		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	_, err := db.Exec(
+		`INSERT INTO db_accounts(domain_id, db_name, db_user, db_pass_plain, db_host)
+		 VALUES(?,?,?,?, 'localhost')`,
+		domainID, dbName, dbUser, pass)
+	return err
+}
+
 // MySQLDropDB: DB ve user kaldir + metadata sil
 func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
 	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
@@ -113,6 +177,21 @@ func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
 		"FLUSH PRIVILEGES;",
 	}
 	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
+		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	_, err := db.Exec(`DELETE FROM db_accounts WHERE db_name=?`, dbName)
+	return err
+}
+
+// MySQLDropDBKeepUser: yalniz DB'yi kaldir + metadata satirini sil; kullaniciya DOKUNMA.
+// Kullanici baska DB'lerde de kullaniliyorsa (mevcut-kullanici modu) onlari bozmamak icin
+// tek-DB silmede kullanilir.
+func MySQLDropDBKeepUser(db *sql.DB, dbName string) error {
+	if !GecerliDBKimlik(dbName) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı")
+	}
+	if out, err := exec.Command("mysql", "-e",
+		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName)).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	_, err := db.Exec(`DELETE FROM db_accounts WHERE db_name=?`, dbName)

@@ -512,9 +512,20 @@ func (h *Handlers) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// createDBReq: "Yeni Veritabanı" istegi.
+//
+// Otomatik=true (veya hicbir alan verilmezse) → DB adi/kullanici/parola OTOMATIK uretilir
+// (eski davranis, geriye uyumlu). Aksi halde musteri OZELLESTIRIR:
+//   - DBSonek: DB adi soneki → panel `<sk>_` onekini ZORUNLU ekler (cakisma-guvenli).
+//   - KullaniciTipi "yeni": KullaniciSonek gir (onek eklenir); "mevcut": MevcutKullanici sec.
+//   - Parola: musteri girer (guclu olmali) VEYA bos → panel guclu rastgele uretir.
 type createDBReq struct {
-	DBAdi       string `json:"db_adi"`
-	DBKullanici string `json:"db_kullanici"`
+	Otomatik        bool   `json:"otomatik"`
+	DBSonek         string `json:"db_sonek"`
+	KullaniciTipi   string `json:"kullanici_tipi"` // "yeni" | "mevcut"
+	KullaniciSonek  string `json:"kullanici_sonek"`
+	MevcutKullanici string `json:"mevcut_kullanici"`
+	Parola          string `json:"parola"`
 }
 
 func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
@@ -533,6 +544,10 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "domain sorgu: "+err.Error())
+		return
+	}
 	if isDemo == 1 {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğe veritabanı eklenemez")
 		return
@@ -541,28 +556,113 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	// Guvenlik: musteri-verdigi ad SQL-guvenli VE domain kullanicisiyla namespaced olmali
-	if req.DBAdi != "" && !hesaplar.MusteriDBKimlikGecerli(sk, req.DBAdi) {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı adı (yalnız harf/rakam/alt-çizgi; '"+sk+"_' önekiyle)")
+
+	// Geriye uyumlu: gövde boş / Otomatik=true → hepsini otomatik üret (eski davranış).
+	otomatik := req.Otomatik ||
+		(req.DBSonek == "" && req.KullaniciSonek == "" && req.MevcutKullanici == "" && req.Parola == "")
+
+	var dbAdi, dbKullanici, parola string
+	mevcutKullaniciModu := false
+
+	if otomatik {
+		dbAdi = sk + "_ek" + strconv.FormatInt(id, 10)
+		dbKullanici = dbAdi
+		parola = hesaplar.RandomParola(24)
+	} else {
+		// --- DB adı: müşteri SONEK verir, panel `<sk>_` önekini ZORUNLU ekler ---
+		if req.DBSonek == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "veritabanı adı soneki gerekli")
+			return
+		}
+		if !hesaplar.GecerliDBSonek(req.DBSonek) {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı soneki (yalnız küçük harf/rakam/alt-çizgi, 1-32 karakter)")
+			return
+		}
+		dbAdi = sk + "_" + req.DBSonek
+		if !hesaplar.GecerliDBKimlik(dbAdi) {
+			httpx.WriteError(w, http.StatusBadRequest, "veritabanı adı çok uzun (önek + sonek ≤64 karakter olmalı)")
+			return
+		}
+
+		// --- Kullanıcı: yeni (sonek) VEYA mevcut (bu domaine ait) ---
+		switch req.KullaniciTipi {
+		case "mevcut":
+			if req.MevcutKullanici == "" || !hesaplar.GecerliDBKimlik(req.MevcutKullanici) {
+				httpx.WriteError(w, http.StatusBadRequest, "geçersiz mevcut kullanıcı")
+				return
+			}
+			// Sahiplik: seçilen kullanıcı GERÇEKTEN bu domaine ait olmalı (önek garantisi).
+			var n int
+			_ = h.DB.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM db_accounts WHERE domain_id=? AND db_user=?`, id, req.MevcutKullanici).Scan(&n)
+			if n == 0 {
+				httpx.WriteError(w, http.StatusBadRequest, "seçilen kullanıcı bu domaine ait değil")
+				return
+			}
+			dbKullanici = req.MevcutKullanici
+			mevcutKullaniciModu = true
+		default: // "yeni"
+			if req.KullaniciSonek == "" {
+				httpx.WriteError(w, http.StatusBadRequest, "kullanıcı adı soneki gerekli")
+				return
+			}
+			if !hesaplar.GecerliDBSonek(req.KullaniciSonek) {
+				httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı soneki (yalnız küçük harf/rakam/alt-çizgi, 1-32 karakter)")
+				return
+			}
+			dbKullanici = sk + "_" + req.KullaniciSonek
+			if !hesaplar.GecerliDBKimlik(dbKullanici) {
+				httpx.WriteError(w, http.StatusBadRequest, "kullanıcı adı çok uzun (önek + sonek ≤64 karakter olmalı)")
+				return
+			}
+			// Yeni kullanıcı için parola: müşteri girer (güçlü) VEYA boş → panel üretir.
+			if req.Parola == "" {
+				parola = hesaplar.RandomParola(24)
+			} else {
+				if ok, neden := hesaplar.ParolaGucluMu(req.Parola); !ok {
+					httpx.WriteError(w, http.StatusBadRequest, neden)
+					return
+				}
+				parola = req.Parola
+			}
+		}
+	}
+
+	// İsim çakışması → net 409 (duplicate-key 500 yerine).
+	var cakisma int
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM db_accounts WHERE db_name=?`, dbAdi).Scan(&cakisma)
+	if cakisma > 0 {
+		httpx.WriteError(w, http.StatusConflict, "bu isimde bir veritabanı zaten var: "+dbAdi)
 		return
 	}
-	if req.DBKullanici != "" && !hesaplar.MusteriDBKimlikGecerli(sk, req.DBKullanici) {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı kullanıcısı (yalnız harf/rakam/alt-çizgi; '"+sk+"_' önekiyle)")
-		return
+
+	if mevcutKullaniciModu {
+		if err := hesaplar.MySQLCreateDBForUser(h.DB, id, dbAdi, dbKullanici); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "DB oluşturma: "+err.Error())
+			return
+		}
+		// Mevcut kullanıcının parolasını yanıtta göster (müşteri zaten sahibi).
+		_ = h.DB.QueryRowContext(r.Context(),
+			`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbKullanici).Scan(&parola)
+	} else {
+		if err := hesaplar.MySQLCreateDB(h.DB, id, dbAdi, dbKullanici, parola); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "DB oluşturma: "+err.Error())
+			return
+		}
 	}
-	if req.DBAdi == "" {
-		req.DBAdi = sk + "_ek" + strconv.FormatInt(id, 10)
-	}
-	if req.DBKullanici == "" {
-		req.DBKullanici = req.DBAdi
-	}
-	pass := hesaplar.RandomParola(24)
-	if err := hesaplar.MySQLCreateDB(h.DB, id, req.DBAdi, req.DBKullanici, pass); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "DB oluşturma: "+err.Error())
-		return
-	}
+
+	// Governor/limit: yeni DB-kullanıcısına plan limitlerini uygula (arka planda, best-effort).
+	go func(did int64) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
+			log.Printf("kaynaklimit apply (db-create) domain=%d: %v", did, err)
+		}
+	}(id)
+
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"ok": true, "domain_id": id, "db_adi": req.DBAdi, "db_kullanici": req.DBKullanici, "db_parola": pass,
+		"ok": true, "domain_id": id, "db_adi": dbAdi, "db_kullanici": dbKullanici, "db_parola": parola,
 	})
 }
 
@@ -582,7 +682,17 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin DB'si silinemez")
 		return
 	}
-	if err := hesaplar.MySQLDropDB(h.DB, dbName, dbUser); err != nil {
+	// Kullanıcı başka DB'lerde de kullanılıyorsa (mevcut-kullanıcı modu) sadece DB'yi
+	// düşür — kullanıcıyı koru (aksi halde paylaşan diğer DB'lerin erişimi kırılır).
+	var paylasim int
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND db_name<>?`, dbUser, dbName).Scan(&paylasim)
+	if paylasim > 0 {
+		if err := hesaplar.MySQLDropDBKeepUser(h.DB, dbName); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
+			return
+		}
+	} else if err := hesaplar.MySQLDropDB(h.DB, dbName, dbUser); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
 		return
 	}

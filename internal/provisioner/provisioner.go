@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -34,6 +35,10 @@ var pkgDB *sql.DB
 // onarılır (heal-on-startup).
 func Init(d *sql.DB) {
 	pkgDB = d
+	// Chicken-egg fix: per-user ACL (setfacl) + RAR açıcı (bsdtar) araçlarını, HealHomePerms
+	// ve dosya yöneticisi RAR-extract'i onlara GÜVENMEDEN ÖNCE garanti et. Böylece araçlar
+	// paketten gelmese bile İLK update'te per-user ACL izolasyonu + RAR extract hazır olur.
+	ensureArchiveTools()
 	HealCacheZoneOnStartup()
 	// Batch2 sertlestirme: panel vhost guvenlik header'lari + mevcut tenant
 	// vhost/pool'larinin (retroaktif) guvenli yeniden-render'i. Her ikisi de
@@ -1117,6 +1122,49 @@ func uidGid(u string) (int, int, error) {
 	uid, _ := strconv.Atoi(uu.Uid)
 	gid, _ := strconv.Atoi(uu.Gid)
 	return uid, gid, nil
+}
+
+// ensureArchiveToolsOnce: araç-heal'i süreç başına BİR KEZ koşturur (recursive/tekrar dnf yok).
+var ensureArchiveToolsOnce sync.Once
+
+// ensureArchiveTools: per-user ACL (`setfacl`, `acl` paketi) ve RAR açıcı (`bsdtar`, libarchive)
+// araçlarını sistemde GARANTİ EDER — panel açılışında, HealHomePerms + dosya yöneticisi RAR
+// extract onlara güvenmeden ÖNCE.
+//
+// 🔴 Neden gerekli (chicken-egg): `girginospanel-update` önce KENDİNİ günceller; araç kuran
+// `dnf install acl bsdtar` adımı yalnız YENİ update-script'te vardır → İLK update'te çalışmaz.
+// Araçlar yoksa hardenHomePerms fail-safe grup=nginx modeline düşer (per-user ACL ancak 2.
+// update'te gelir) ve .rar açılamaz. Bu heal, araçları panelin kendi açılışında kurar → İLK
+// update + restart'ta bile per-user ACL izolasyonu ve RAR extract hazır olur.
+//
+// İdempotent + süreç başına bir kez (sync.Once). Araç zaten PATH'te ise dnf ÇAĞRILMAZ. dnf
+// yoksa (farklı dağıtım / minimal ortam) SESSİZCE atlanır → mevcut fail-safe dallar (grup=nginx,
+// RAR unar/unrar fallback) devrede kalır. Her kurulum loglanır.
+func ensureArchiveTools() {
+	ensureArchiveToolsOnce.Do(func() {
+		// dnf yoksa hiçbir şey kuramayız; fail-safe dallara bırak.
+		if _, err := exec.LookPath("dnf"); err != nil {
+			return
+		}
+		// (1) setfacl → per-user ACL izolasyon modeli (hardenHomePerms).
+		if _, err := exec.LookPath("setfacl"); err != nil {
+			if out, err := exec.Command("dnf", "install", "-y", "acl").CombinedOutput(); err != nil {
+				log.Printf("araç-heal: 'acl' kurulamadı (fail-safe grup=nginx devrede): %s", strings.TrimSpace(string(out)))
+			} else {
+				log.Printf("araç-heal: 'acl' (setfacl) kuruldu → per-user ACL izolasyonu ilk update'te aktif")
+			}
+		}
+		// (2) bsdtar → RAR/RAR5 açıcı primer aracı (libarchive; unar/unrar yalnız fallback).
+		// bsdtar yoksa kur — böylece ilk update'te güvenilir açıcı hazır olur (unar/unrar
+		// mevcut olsa bile primer araç eksik kalmasın).
+		if _, err := exec.LookPath("bsdtar"); err != nil {
+			if out, err := exec.Command("dnf", "install", "-y", "bsdtar").CombinedOutput(); err != nil {
+				log.Printf("araç-heal: 'bsdtar' kurulamadı (RAR için unar/unrar fallback denenebilir): %s", strings.TrimSpace(string(out)))
+			} else {
+				log.Printf("araç-heal: 'bsdtar' (libarchive) kuruldu → RAR extract ilk update'te hazır")
+			}
+		}
+	})
 }
 
 // aclVar: POSIX ACL araçları (setfacl) kurulu mu? (installer/update `acl` paketini kurar.)
