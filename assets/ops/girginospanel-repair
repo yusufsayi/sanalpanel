@@ -8,7 +8,22 @@
 #   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon  (varsayılan: hepsi)
 #   --dry-run : değişiklikleri UYGULAMADAN neyin düzeltileceğini göster
 #   --deep    : domain ev dizinlerinde RECURSIVE sahiplik onarımı (yavaş, büyük siteler)
+#
+#   girginospanel-repair restore [...]  → CORE DOSYA İÇERİK onarımı (0-byte frontend / bozuk
+#     binary / eksik ops-tool) canonical release'ten atomik+doğrulanmış geri yükleme. secret/veri
+#     KORUNUR. Ayrı girginospanel-restore aracına devreder (arg'lar aynen iletilir).
 set -uo pipefail
+
+# 'restore' ALT-KOMUTU: içerik onarımını ayrı araca devret. GERİYE UYUMLU — mevcut çağrılar
+# (bare / --quiet / --dry-run / --deep / --only) DEĞİŞMEDEN izin/sahiplik/SELinux onarır; sadece
+# ilk argüman tam olarak 'restore' ise devreye girer (install.sh'ın --quiet çağrısı etkilenmez).
+if [ "${1:-}" = "restore" ]; then
+  shift
+  command -v girginospanel-restore >/dev/null 2>&1 && exec girginospanel-restore "$@"
+  _rd="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/girginospanel-restore"
+  [ -x "$_rd" ] && exec "$_rd" "$@"
+  echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
+fi
 
 DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon"
 while [ $# -gt 0 ]; do
