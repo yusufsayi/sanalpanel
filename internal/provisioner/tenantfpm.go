@@ -298,6 +298,13 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	fmt.Fprintf(&b, "php_admin_value[max_input_time] = %d\n", ps.MaxInputTime)
 	fmt.Fprintf(&b, "php_admin_value[post_max_size] = %s\n", ps.PostMaxSize)
 	fmt.Fprintf(&b, "php_admin_value[upload_max_filesize] = %s\n", ps.UploadMaxFilesize)
+	// ---- Loglama (per-tenant, saglam): PHP fatal'lari sessizce kaybolmasin ----
+	// log_errors ACIK + display_errors KAPALI (prod). error_log BILEREK verilmez ->
+	// PHP hatalari stderr'e gider, catch_workers_output ile master bunlari per-tenant
+	// error_log'a (tenant-<sk>.log) yazar. php_admin_value[error_log]=<yazilamaz/paylasimli
+	// yol> ANTI-PATTERN'i (fatal'lari sessizce yutar) bu sablonda ASLA uretilmez.
+	b.WriteString("php_admin_flag[log_errors] = on\n")
+	b.WriteString("php_admin_flag[display_errors] = off\n")
 	b.WriteString("catch_workers_output = yes\n")
 	return b.String()
 }
@@ -555,6 +562,10 @@ func EnsureTenantFPMOnStartup() {
 			continue
 		}
 		// aktif mi?
+		// config-drift onarimi: eski provizyonlardan kalan hatali pool ayarlarini
+		// (or. yazilamaz www-error.log error_log override'i -> fatal'lari yutuyordu)
+		// guvenle duzeltir. php-fpm -t dogrular; bozuksa geri alir; graceful reload.
+		repairTenantPoolDrift(d.id, d.sk, d.php)
 		if out, _ := exec.Command("systemctl", "is-active", tenantUnitName(d.sk)).CombinedOutput(); strings.TrimSpace(string(out)) == "active" {
 			continue
 		}
@@ -564,4 +575,44 @@ func EnsureTenantFPMOnStartup() {
 			_ = out
 		}
 	}
+}
+
+// repairTenantPoolDrift: mevcut per-tenant pool.conf guncel sablondan (renderTenantPool)
+// sapmissa GUVENLE yeniden yazar. Amac: eski provizyonlardan kalan hatali ayarlari
+// (ozellikle php_admin_value[error_log] = /var/log/php-fpm/www-error.log — yazilamaz/paylasimli
+// hedef, PHP fatal'larini SESSIZCE yutuyordu) duzeltmek + loglama sertlestirmesini geriye
+// donuk uygulamak. Idempotent: drift yoksa hicbir sey yapmaz (reload YOK). php-fpm -t ile
+// dogrular; bozuksa eski config'i geri alir. Graceful reload (USR2) → site kesintiye ugramaz.
+func repairTenantPoolDrift(domainID int64, sk, surum string) {
+	if pkgDB == nil || sk == "" || !strings.HasPrefix(sk, "c_") {
+		return
+	}
+	cfgDir := tenantCfgDir(sk)
+	poolPath := filepath.Join(cfgDir, "pool.conf")
+	cur, err := os.ReadFile(poolPath)
+	if err != nil {
+		return // pool.conf yok → dokunma (EnableTenantFPM ilgilenir)
+	}
+	want := renderTenantPool(pkgDB, sk, domainID)
+	if string(cur) == want {
+		return // drift yok → no-op
+	}
+	ay := phpMap[normalizePHP(surum)]
+	if ay.FpmBin == "" {
+		return
+	}
+	// yeni pool.conf'u yaz → php-fpm -t → basarisizsa eski haline geri al
+	if err := os.WriteFile(poolPath, []byte(want), 0644); err != nil {
+		return
+	}
+	if out, terr := exec.Command(ay.FpmBin, "-t", "-y", filepath.Join(cfgDir, "php-fpm.conf")).CombinedOutput(); terr != nil {
+		_ = os.WriteFile(poolPath, cur, 0644) // rollback
+		log.Printf("repairTenantPoolDrift: %s php-fpm -t basarisiz, geri alindi: %s", sk, strings.TrimSpace(string(out)))
+		return
+	}
+	// graceful reload (ExecReload=USR2) — calisan istekleri dusurmez
+	if out, rerr := exec.Command("systemctl", "reload", tenantUnitName(sk)).CombinedOutput(); rerr != nil {
+		log.Printf("repairTenantPoolDrift: %s reload uyarisi: %s", sk, strings.TrimSpace(string(out)))
+	}
+	log.Printf("repairTenantPoolDrift: %s pool.conf guncellendi (loglama sertlestirmesi + drift onarimi)", sk)
 }
