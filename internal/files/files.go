@@ -24,7 +24,7 @@ import (
 
 // MaxUploadBytes: tek yükleme için üst sınır. Onceden 10 GiB idi ve ParseMultipartForm'a
 // maxMemory olarak veriliyordu → tek istekle 10 GiB RAM ayrilabiliyordu (DoS).
-const MaxUploadBytes = 2 * 1024 * 1024 * 1024 // 2 GiB
+const MaxUploadBytes = 10 * 1024 * 1024 * 1024 // 10 GiB
 
 // maxMultipartMemory: multipart ayrıştırmada RAM'de tutulacak azami tampon. Fazlası
 // otomatik olarak geçici diske taşar → büyük yüklemelerde RAM patlamaz.
