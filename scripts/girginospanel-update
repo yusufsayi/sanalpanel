@@ -183,6 +183,32 @@ if ! command -v bsdtar >/dev/null 2>&1 && ! command -v unar >/dev/null 2>&1 && !
 fi
 command -v restorecon >/dev/null && restorecon -R "$PREFIX/bin" "$FDIST" >/dev/null 2>&1 || true
 
+# 10b) Disk kotası (XFS user quota) GRUB yapılandırma — 🔴 CANLI SUNUCU: OTO-REBOOT ETME.
+# Kök fs XFS + noquota ise `rootflags=uquota`'yı /etc/default/grub'a idempotent yaz; kota ancak
+# MOUNT anında (reboot ile) açılır. Reboot'u OPERATÖR zamanlar → sentinel dosyası + net uyarı
+# bırak. Panel açılışındaki HealKotaOnStartup, fs kota aktif olduğunda limitleri kendi uygular.
+command -v quota >/dev/null 2>&1 || dnf install -y quota xfsprogs >/dev/null 2>&1 || true
+QROOTFS=$(findmnt -no FSTYPE / 2>/dev/null || echo "")
+QROOTOPTS=$(findmnt -no OPTIONS / 2>/dev/null || echo "")
+QSENTINEL=/etc/girginospanel/reboot-required-quota
+if [ "$QROOTFS" = "xfs" ] && ! echo "$QROOTOPTS" | grep -qwE 'usrquota|uquota|quota'; then
+  if ! grep -q 'rootflags=uquota' /etc/default/grub 2>/dev/null; then
+    if grep -q '^GRUB_CMDLINE_LINUX=' /etc/default/grub 2>/dev/null; then
+      sed -i 's/^\(GRUB_CMDLINE_LINUX="[^"]*\)"/\1 rootflags=uquota"/' /etc/default/grub
+    else
+      echo 'GRUB_CMDLINE_LINUX="rootflags=uquota"' >> /etc/default/grub
+    fi
+    command -v grubby >/dev/null 2>&1 && grubby --update-kernel=ALL --args="rootflags=uquota" >/dev/null 2>&1 || true
+    grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1 || true
+    for cfg in /boot/efi/EFI/*/grub.cfg; do [ -f "$cfg" ] && grub2-mkconfig -o "$cfg" >/dev/null 2>&1 || true; done
+  fi
+  mkdir -p /etc/girginospanel
+  echo "rootflags=uquota GRUB'a yazildi $(date -Is 2>/dev/null) — reboot bekleniyor" > "$QSENTINEL" 2>/dev/null || true
+  warn "🔴 Disk kotası GRUB'a yazıldı — AKTİF olması için tek seferlik REBOOT gerekli (canlı sunucuda operatör zamanlar). OTO-REBOOT YAPILMADI."
+elif [ "$QROOTFS" = "xfs" ]; then
+  [ -f "$QSENTINEL" ] && rm -f "$QSENTINEL" 2>/dev/null && ok "disk kotası aktif — reboot sentinel temizlendi" || ok "disk kotası aktif (kök XFS user quota)"
+fi
+
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
 step "Yeniden başlatılıyor"
 systemctl restart girginospanel

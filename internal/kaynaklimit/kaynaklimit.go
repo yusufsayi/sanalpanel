@@ -260,48 +260,172 @@ func hesaplaPMMaxChildren(l Limitler) int {
 	return 8
 }
 
-// XFSKotaUygula: xfs_quota project quota (inode + blok) ile kullanıcı dizini kotalar.
-// /home XFS ile mount olmalı ve pquota özelliği aktif.
-func XFSKotaUygula(sk string, l Limitler) error {
+// ── XFS USER quota (CloudLinux disk + inode paritesi) ──────────────────────────
+// Tenant home'u (/home/c_<sk>) AYRI mount OLMASA da (her iki prod sunucuda /home root
+// XFS `/dev/vdaN` / `/dev/sdaN` üstünde), XFS *user* quota tenant kullanıcısına (c_<sk>)
+// kök mount üzerinden uygulanır. Dosyalar zaten c_<sk>:c_<sk> sahipli → user quota tam
+// eşleşir + tenant chown yapamadığı için kaçış-korumalı. Eski PROJECT-quota yaklaşımı
+// (/home ayrı mount + pquota) bu altyapıda çalışmaz → user-quota ile değiştirildi.
+//
+// 🔴 Kök fs XFS kotası ancak MOUNT anında açılır; canlı remount ile açılamaz → GRUB
+// `rootflags=uquota` + tek seferlik reboot ŞART (installer/update script yazar). Kota
+// fs'te AKTİF DEĞİLKEN (noquota, reboot bekliyor) TÜM kota işlemleri SESSİZCE atlanır —
+// asla hard-fail (aksi halde tenant create patlardı).
+
+// kotaMount: XFS user quota'nın uygulandığı mount noktası. /home ayrı mount DEĞİL → kök.
+const kotaMount = "/"
+
+// Plan atanmamış tenant için makul üst sınır (CloudLinux paritesi — sınırsız bırakma).
+const (
+	varsayilanDiskMB = 5120   // 5 GB
+	varsayilanInode  = 500000 // 500k dosya+dizin
+)
+
+// reKotaSK: sistem kullanıcı allowlist'i. provisioner.SlugFromDomain "c_" + [a-z0-9_] üretir.
+// xfs_quota arg-slice'ına YALNIZ buradan geçen sk gider → shell/arg injection kapalı.
+var reKotaSK = regexp.MustCompile(`^c_[a-z0-9_]{1,60}$`)
+
+// mountKotaAktif: kök fs'te XFS user quota accounting/enforcement açık mı.
+// `xfs_quota -x -c 'state -u' /` çıktısını parse eder; noquota'da çıktı boş → (false,false).
+func mountKotaAktif() (accounting, enforcement bool) {
+	out, err := exec.Command("xfs_quota", "-x", "-c", "state -u", kotaMount).CombinedOutput()
+	if err != nil {
+		return false, false
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		t := strings.TrimSpace(ln)
+		switch {
+		case strings.HasPrefix(t, "Accounting:"):
+			accounting = strings.Contains(t, "ON")
+		case strings.HasPrefix(t, "Enforcement:"):
+			enforcement = strings.Contains(t, "ON")
+		}
+	}
+	return accounting, enforcement
+}
+
+// kotaLimitArgs: xfs_quota'ya verilecek arg-slice (saf → birim-test edilebilir).
+// soft = hard*0.95. diskMB veya inode 0 ise o metrik "0" = SINIRSIZ bırakılır
+// (xfs_quota'da bhard/ihard=0 → limit yok). sk çağırandan önce reKotaSK'dan geçmiş olmalı.
+func kotaLimitArgs(sk string, diskMB, inode int) []string {
+	if diskMB < 0 {
+		diskMB = 0
+	}
+	if inode < 0 {
+		inode = 0
+	}
+	diskSoft := diskMB * 95 / 100
+	inodeSoft := inode * 95 / 100
+	limit := fmt.Sprintf("limit -u bsoft=%dm bhard=%dm isoft=%d ihard=%d %s",
+		diskSoft, diskMB, inodeSoft, inode, sk)
+	return []string{"-x", "-c", limit, kotaMount}
+}
+
+// KotaUygula: tenant (c_<sk>) için XFS user disk+inode kotasını uygular.
+// fs'te kota AKTİF DEĞİLSE (noquota — reboot bekliyor) → log + return nil (ASLA hata).
+// diskMB/inode 0 = o limiti sınırsız bırak. Komut arg-slice ile çağrılır (shell yok);
+// sk allowlist'ten (reKotaSK) geçer → injection yok.
+func KotaUygula(ctx context.Context, sk string, diskMB, inode int) error {
+	if !reKotaSK.MatchString(sk) {
+		return fmt.Errorf("kota: geçersiz sistem kullanıcı biçimi: %q", sk)
+	}
+	if acc, enf := mountKotaAktif(); !acc && !enf {
+		log.Printf("kota: fs'te aktif değil (noquota) — tek seferlik reboot gerekli, %s atlandı", sk)
+		return nil
+	}
 	home := "/home/" + sk
 	if _, err := os.Stat(home); os.IsNotExist(err) {
-		return nil
+		return nil // henüz provision edilmemiş → sessiz atla
 	}
-	// Project ID = uid (basit eşleme)
+	// Kullanıcı gerçekten var mı + uid>0 (root'a/sisteme ASLA kota koyma).
 	uidOut, err := exec.Command("id", "-u", sk).Output()
 	if err != nil {
-		return fmt.Errorf("uid al: %w", err)
-	}
-	projID := strings.TrimSpace(string(uidOut))
-	if projID == "" || projID == "0" {
-		return fmt.Errorf("geçersiz uid: %s", projID)
-	}
-
-	// xfs_quota destekliyorsa dene (destek yoksa sessiz atla)
-	// blok limit: KB cinsinden. disk_kota_mb * 1024 = KB.
-	blokKB := l.DiskKotaMB * 1024
-	inode := l.InodeKota
-	if blokKB <= 0 && inode <= 0 {
 		return nil
 	}
-	// Project mapping ekle (idempotent)
-	line := fmt.Sprintf("%s:%s\n", projID, home)
-	f, _ := os.OpenFile("/etc/projid", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if f != nil {
-		defer f.Close()
-		f.WriteString(line)
+	if uid := strings.TrimSpace(string(uidOut)); uid == "" || uid == "0" {
+		return fmt.Errorf("kota: %s geçersiz uid (%q)", sk, uid)
 	}
-	// project quota init (idempotent, hata yut)
-	_ = exec.Command("xfs_quota", "-x", "-c",
-		fmt.Sprintf("project -s -p %s %s", home, projID), "/home").Run()
-
-	limit := fmt.Sprintf("limit -p bsoft=%dk bhard=%dk isoft=%d ihard=%d %s",
-		blokKB, blokKB, inode, inode, projID)
-	if out, err := exec.Command("xfs_quota", "-x", "-c", limit, "/home").CombinedOutput(); err != nil {
-		// XFS quota özelliği yoksa (`pquota` mount opsiyonu eksikse) sessiz devam
-		log.Printf("xfs_quota %s: %s (mount pquota aktif değil olabilir)", sk, strings.TrimSpace(string(out)))
+	if out, e := exec.CommandContext(ctx, "xfs_quota", kotaLimitArgs(sk, diskMB, inode)...).CombinedOutput(); e != nil {
+		return fmt.Errorf("xfs_quota limit %s: %s: %w", sk, strings.TrimSpace(string(out)), e)
 	}
+	log.Printf("kota uygulandı: %s disk=%dMB inode=%d", sk, diskMB, inode)
 	return nil
+}
+
+// efektifKota: domain override (>0) > plan değeri > (plan yoksa) varsayılan.
+// Plan ATANMIŞSA plan değeri kullanılır (0 = plan tarafından açıkça sınırsız); plan YOKSA
+// varsayılan makul sınır uygulanır (CloudLinux paritesi). Domain override her ikisini de ezer.
+func efektifKota(diskOverride, inodeOverride int, planVar bool, planDisk, planInode int) (int, int) {
+	disk, inode := varsayilanDiskMB, varsayilanInode
+	if planVar {
+		disk, inode = planDisk, planInode
+	}
+	if diskOverride > 0 {
+		disk = diskOverride
+	}
+	if inodeOverride > 0 {
+		inode = inodeOverride
+	}
+	return disk, inode
+}
+
+// DomainKotaUygula: domain için efektif kotayı (override>plan>varsayılan) çözer ve KotaUygula
+// çağırır. Create + plan-değişim hook'ları (UygulaHepsi/LimitleriReAssert) ve HealKotaOnStartup
+// buradan geçer → tek çözümleme kaynağı.
+func DomainKotaUygula(ctx context.Context, db *sql.DB, domainID int64) error {
+	var sk string
+	var dDisk, dInode int
+	var planID sql.NullInt64
+	var pDisk, pInode int
+	err := db.QueryRowContext(ctx, `
+		SELECT d.sistem_kullanici,
+		       COALESCE(d.disk_kota_mb,0), COALESCE(d.inode_kota,0),
+		       d.plan_id,
+		       COALESCE(p.disk_kota_mb,0), COALESCE(p.inode_kota,0)
+		FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
+		WHERE d.id=?`, domainID).
+		Scan(&sk, &dDisk, &dInode, &planID, &pDisk, &pInode)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(sk, "c_") {
+		return nil // admin/geçersiz sistem kullanıcı → dokunma
+	}
+	disk, inode := efektifKota(dDisk, dInode, planID.Valid, pDisk, pInode)
+	return KotaUygula(ctx, sk, disk, inode)
+}
+
+// kotaReportSatir: `xfs_quota report -u -N <metric> /` çıktısında sk satırının Used + Hard
+// alanlarını döner (blok metriği KB; inode metriği adet). Satır: User Used Soft Hard [grace...].
+func kotaReportSatir(metric, sk string) (used, hard int) {
+	out, err := exec.Command("xfs_quota", "-x", "-c", "report -u -N "+metric, kotaMount).CombinedOutput()
+	if err != nil {
+		return 0, 0
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 4 || f[0] != sk {
+			continue
+		}
+		used, _ = strconv.Atoi(f[1])
+		hard, _ = strconv.Atoi(f[3])
+		return used, hard
+	}
+	return 0, 0
+}
+
+// KotaDurum: tenant'ın anlık disk(MB)/inode kullanım + limitlerini xfs_quota'dan okur (UI için).
+// Kota aktif değilse veya sk geçersizse hepsi 0 döner.
+func KotaDurum(sk string) (kullanilanMB, limitMB, kullanilanInode, limitInode int) {
+	if !reKotaSK.MatchString(sk) {
+		return 0, 0, 0, 0
+	}
+	if acc, enf := mountKotaAktif(); !acc && !enf {
+		return 0, 0, 0, 0
+	}
+	bUsedKB, bHardKB := kotaReportSatir("-b", sk) // KB
+	iUsed, iHard := kotaReportSatir("-i", sk)     // adet
+	return bUsedKB / 1024, bHardKB / 1024, iUsed, iHard
 }
 
 // reGovernorUser: MySQL kullanıcı adı allowlist'i (backtick/tırnak/boşluk yok → SQLi kapalı).
@@ -499,6 +623,11 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 			}
 		}
 		_ = SystemdSliceSil(sk)
+		// Plan yok olsa da tenant'a VARSAYILAN disk/inode kotası uygula (CloudLinux paritesi:
+		// sınırsız bırakma). fs noquota ise KotaUygula sessizce atlar (asla hata).
+		if err := DomainKotaUygula(ctx, db, domainID); err != nil {
+			log.Printf("kota (plansız) %s: %v", sk, err)
+		}
 		return nil
 	}
 	// 1) slice (cgroup limitleri) — canlı, süreç-öldürmez.
@@ -518,10 +647,10 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if _, err := provisioner.EnableTenantFPM(db, domainID, sk, surum); err != nil {
 		log.Printf("per-tenant fpm %s: %v (paylaşılan düzende kalındı)", sk, err)
 	}
-	// 4) disk kotası (xfs) + MySQL Governor (domain'in TÜM db_accounts kullanıcılarına
+	// 4) disk kotası (XFS user quota) + MySQL Governor (domain'in TÜM db_accounts kullanıcılarına
 	//    native GRANT limitleri: bağlantı + sorgu/saat + güncelleme/saat).
-	if err := XFSKotaUygula(sk, l); err != nil {
-		log.Printf("xfs quota %s: %v", sk, err)
+	if err := DomainKotaUygula(ctx, db, domainID); err != nil {
+		log.Printf("xfs user-quota %s: %v", sk, err)
 	}
 	if err := MySQLLimitUygula(ctx, db, domainID, l); err != nil {
 		log.Printf("mysql governor %s: %v", sk, err)
@@ -567,8 +696,8 @@ func LimitleriReAssert(ctx context.Context, db *sql.DB, domainID int64) error {
 		`UPDATE php_settings SET pm_max_children=? WHERE domain_id=?`, hesaplaPMMaxChildren(l), domainID); e != nil {
 		log.Printf("re-assert pm_max_children %s: %v", sk, e)
 	}
-	if e := XFSKotaUygula(sk, l); e != nil {
-		log.Printf("re-assert xfs %s: %v", sk, e)
+	if e := DomainKotaUygula(ctx, db, domainID); e != nil {
+		log.Printf("re-assert xfs user-quota %s: %v", sk, e)
 	}
 	// 🔴 MySQL Governor: domain'in TÜM db_accounts kullanıcılarına (ana + wpu_ + alt) gerçek
 	// host'lardan native limit. Coverage fix'i mevcut tenant'lara da böyle iner.
@@ -688,4 +817,54 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 	}
 	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif(re-assert) / %d rollback (toplam %d planlı domain)",
 		migrated, zaten, rollback, len(list))
+}
+
+// HealKotaOnStartup: açılışta TÜM tenant'lar (c_<sk>) için efektif XFS user kotasını
+// (override>plan>varsayılan) idempotent RE-ASSERT eder. fs'te kota AKTİF DEĞİLSE (noquota —
+// tek seferlik reboot bekliyor) HİÇBİR ŞEY uygulanmaz; hepsi "atlandı" sayılır (ASLA hata).
+// Panel boot'unu bloklamaz (bg goroutine olarak çağrılır). Kod/plan drift'i her restart'ta
+// mevcut tenant'lara iner. Log: "kota heal: N tenant / M atlandı[ (fs noquota)]".
+func HealKotaOnStartup(ctx context.Context, db *sql.DB) {
+	if db == nil {
+		return
+	}
+	// fs kota aktif değilse: tek log + çık (tüm tenant'lar atlandı — reboot bekliyor).
+	if acc, enf := mountKotaAktif(); !acc && !enf {
+		var toplam int
+		_ = db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM domains WHERE sistem_kullanici LIKE 'c\_%'`).Scan(&toplam)
+		log.Printf("kota heal: 0 tenant / %d atlandı (fs noquota — tek seferlik reboot gerekli)", toplam)
+		return
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id FROM domains WHERE sistem_kullanici LIKE 'c\_%' ORDER BY id`)
+	if err != nil {
+		log.Printf("kota heal: domain listesi okunamadı: %v", err)
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	var uygulandi, atlandi int
+	for _, id := range ids {
+		select {
+		case <-ctx.Done():
+			log.Printf("kota heal: iptal (ctx) — %d tenant / %d atlandı", uygulandi, atlandi)
+			return
+		default:
+		}
+		if e := DomainKotaUygula(ctx, db, id); e != nil {
+			log.Printf("kota heal: domain %d hata: %v", id, e)
+			atlandi++
+			continue
+		}
+		uygulandi++
+	}
+	log.Printf("kota heal: %d tenant / %d atlandı", uygulandi, atlandi)
 }

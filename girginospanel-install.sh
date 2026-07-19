@@ -60,6 +60,37 @@ else
   warn "RAR açıcı kurulamadı — dosya yöneticisi .rar extract devre dışı (zip/tar çalışır)"
 fi
 
+# ============ 2b) DİSK KOTASI (XFS user quota — CloudLinux paritesi) ============
+# Per-tenant disk + inode kotası XFS *user* quota ile uygulanır (dosyalar c_<sk>:c_<sk>
+# sahipli → user quota tam eşleşir + kaçış-korumalı). Kök fs XFS + `noquota` ise kota
+# ancak MOUNT anında açılır (canlı remount ile açılamaz) → GRUB'a `rootflags=uquota` yaz.
+# Taze kurulumda kurulum sonrası reboot ile kota AKTİF gelir.
+step "2b) Disk kotası (XFS user quota)"
+dnf install -y quota xfsprogs >/dev/null 2>&1 && ok "quota + xfsprogs" || warn "quota paketleri atlandı"
+ROOTFS_TYPE=$(findmnt -no FSTYPE / 2>/dev/null || echo "")
+ROOTFS_OPTS=$(findmnt -no OPTIONS / 2>/dev/null || echo "")
+if [ "$ROOTFS_TYPE" != "xfs" ]; then
+  warn "kök fs XFS değil ($ROOTFS_TYPE) — XFS disk kotası atlandı"
+elif echo "$ROOTFS_OPTS" | grep -qwE 'usrquota|uquota|quota'; then
+  ok "kök XFS user quota zaten aktif"
+else
+  if grep -q 'rootflags=uquota' /etc/default/grub 2>/dev/null; then
+    ok "GRUB rootflags=uquota zaten ekli"
+  else
+    if grep -q '^GRUB_CMDLINE_LINUX=' /etc/default/grub 2>/dev/null; then
+      sed -i 's/^\(GRUB_CMDLINE_LINUX="[^"]*\)"/\1 rootflags=uquota"/' /etc/default/grub
+    else
+      echo 'GRUB_CMDLINE_LINUX="rootflags=uquota"' >> /etc/default/grub
+    fi
+    # mevcut boot girdilerini de güncelle (BLS) + grub.cfg'yi yeniden üret (BIOS + EFI).
+    command -v grubby >/dev/null 2>&1 && grubby --update-kernel=ALL --args="rootflags=uquota" >/dev/null 2>&1 || true
+    grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1 || true
+    for cfg in /boot/efi/EFI/*/grub.cfg; do [ -f "$cfg" ] && grub2-mkconfig -o "$cfg" >/dev/null 2>&1 || true; done
+    ok "GRUB rootflags=uquota eklendi (kök XFS)"
+  fi
+  warn "Disk kotası için TEK SEFERLİK reboot sonrası aktif olur (kök fs remount ile açılamaz)."
+fi
+
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
 BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6"
@@ -346,4 +377,7 @@ echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
 echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:8443${c_0}"
 echo -e "   Kullanıcı: ${c_b}root${c_0}   Parola: ${c_b}bu sunucunun root parolası${c_0}"
 echo -e "   (panel admin girişi sunucu root'unu PAM ile doğrular)"
+if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ] && ! findmnt -no OPTIONS / 2>/dev/null | grep -qwE 'usrquota|uquota|quota'; then
+  echo -e "   ${c_y}Disk kotası: GRUB'a rootflags=uquota yazıldı — TEK SEFERLİK reboot sonrası aktif olur.${c_0}"
+fi
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"

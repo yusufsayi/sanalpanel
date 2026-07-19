@@ -112,6 +112,10 @@ func main() {
 	// Batch5A: MySQL Governor yavaş-sorgu watchdog (plan db_max_query_seconds>0 olan tenant
 	// DB-kullanıcılarının eşik-aşan sorgularını KILL eder). Panel ömrü boyunca bg çalışır.
 	go kaynaklimit.SlowQueryWatchdog(context.Background(), d)
+	// Disk kotası (XFS user quota — CloudLinux paritesi): fs'te kota AKTİF ise TÜM tenant'lara
+	// efektif kotayı (domain override > plan > varsayılan) idempotent uygula; noquota ise
+	// (tek seferlik reboot bekliyor) sessizce atla. Boot'u bloklamaz (bg goroutine).
+	go kaynaklimit.HealKotaOnStartup(context.Background(), d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}

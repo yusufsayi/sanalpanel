@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kaynaklimit"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -29,12 +30,16 @@ type Ozet struct {
 	SSLBitis string `json:"ssl_bitis,omitempty"`
 
 	// Limit'li metrikler (kullanim / limit)
-	DiskMB     Limit `json:"disk_mb"`     // disk_kota_mb plan'dan
+	DiskMB     Limit `json:"disk_mb"`     // disk_kota_mb plan'dan (kota aktifse XFS'ten gerçek)
 	TrafikMB   Limit `json:"trafik_mb"`   // trafik_kota_mb plan'dan
 	DBSayisi   Limit `json:"db_sayisi"`   // max_db plan'dan
 	FTPSayisi  Limit `json:"ftp_sayisi"`  // max_ftp plan'dan
 	EpostaSayi Limit `json:"eposta_sayi"` // max_email plan'dan
 	DomainSayi Limit `json:"domain_sayi"` // max_domain plan'dan (subdomain dahil)
+
+	// Inode kotası (yalnız XFS user quota AKTİF ise dolu — aksi halde 0)
+	InodeKullanim int64 `json:"inode_kullanim"`
+	InodeLimit    int64 `json:"inode_limit"`
 
 	// Bonus sayaclar (limit yok)
 	DNSKayit    int64 `json:"dns_kayit"`
@@ -124,6 +129,18 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	o.DiskMB.Kullanim = duMB(home)
 	_, _ = h.DB.ExecContext(ctx, `UPDATE domains SET boyut_kb=? WHERE id=?`, o.DiskMB.Kullanim*1024, id)
 	o.DiskMB.Limit = diskKota
+	// XFS user quota AKTİF ise gerçek disk kullanım/limit + inode kullanım/limit oradan (du'dan
+	// daha doğru + inode dahil). noquota'da KotaDurum 0 döner → du-tabanlı değerler korunur.
+	if kMB, klimMB, kIno, klimIno := kaynaklimit.KotaDurum(o.SK); klimMB > 0 || klimIno > 0 {
+		if kMB > 0 {
+			o.DiskMB.Kullanim = int64(kMB)
+		}
+		if klimMB > 0 {
+			o.DiskMB.Limit = int64(klimMB)
+		}
+		o.InodeKullanim = int64(kIno)
+		o.InodeLimit = int64(klimIno)
+	}
 
 	// Trafik: domains.trafik_kb (KB → MB)
 	var trafikKB int64
