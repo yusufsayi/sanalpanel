@@ -265,16 +265,13 @@ func (h *Handlers) Mkdir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	abs, err := jailJoinStrict(home, req.Yol)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := os.MkdirAll(abs, 0755); err != nil {
+	// TOCTOU symlink-güvenli: mkdir -p'yi her bileşende Mkdirat+O_NOFOLLOW ile yürüt; yeni
+	// dizinler fd üzerinden tenant'a chown edilir (bkz. safeio.go). Eski os.MkdirAll(abs)
+	// resolved-string üzerinde çalışıp ara-dizin symlink takasına açıktı.
+	if err := mkdirAllBeneath(home, req.Yol, sk); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "mkdir: "+err.Error())
 		return
 	}
-	chown(abs, sk)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "yol": req.Yol})
 }
 
@@ -285,16 +282,14 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("yol")
-	abs, err := jailJoinStrict(home, rel)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if abs == home {
+	if p := relClean(rel); p == "" || p == "." {
 		httpx.WriteError(w, http.StatusBadRequest, "ana ev dizini silinemez")
 		return
 	}
-	if err := os.RemoveAll(abs); err != nil {
+	// TOCTOU symlink-güvenli: parent'ı openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS) ile pinle,
+	// fd-özyinelemeli unlinkat ile sil (bkz. safeio.go). Eski os.RemoveAll(abs) resolved-string
+	// üzerinde çalışıp ara-dizin symlink takasıyla jail-dışı silmeye kandırılabilirdi.
+	if err := removeAllBeneath(home, rel); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silme: "+err.Error())
 		return
 	}
@@ -334,24 +329,16 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "dosya çok büyük (max 2 GiB)")
 		return
 	}
-	abs, err := jailJoinStrict(home, filepath.Join(rel, fh.Filename))
+	// TOCTOU symlink-güvenli: hedefi openat2 ile aç (ara-bileşen/leaf symlink REDDEDİLİR),
+	// fd'ye akışla kopyala, sonra fd üzerinden tenant'a chown (bkz. safeio.go). Eski
+	// os.Create(abs) resolved-string üzerinde çalışıp symlink takasına açıktı.
+	dstRel := filepath.Join(rel, fh.Filename)
+	written, err := copyStreamBeneath(home, dstRel, file, sk)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	out, err := os.Create(abs)
-	if err != nil {
+		_ = removeAllBeneath(home, dstRel)
 		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
 		return
 	}
-	defer out.Close()
-	written, err := io.Copy(out, file)
-	if err != nil {
-		_ = os.Remove(abs)
-		httpx.WriteError(w, http.StatusInternalServerError, "kopya: "+err.Error())
-		return
-	}
-	chown(abs, sk)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
 		"ok":    true,
 		"yol":   filepath.ToSlash(filepath.Join(rel, fh.Filename)),

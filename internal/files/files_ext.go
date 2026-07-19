@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -77,25 +76,18 @@ func (h *Handlers) Yaz(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	abs, err := jailJoinStrict(home, req.Yol)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	if len(req.Icerik) > 5*1024*1024 {
 		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "5 MB üstü editor ile kaydedilemez")
 		return
 	}
-	// Var olan dosyanın izinleri korunsun (varsa)
-	mode := os.FileMode(0644)
-	if info, err := os.Stat(abs); err == nil {
-		mode = info.Mode().Perm()
-	}
-	if err := os.WriteFile(abs, []byte(req.Icerik), mode); err != nil {
+	// TOCTOU symlink-güvenli yazma: hedefi openat2 ile aç (ara-bileşen/leaf symlink REDDEDİLİR),
+	// fd'ye yaz, fd üzerinden tenant'a chown (bkz. safeio.go). Mevcut dosyanın izinleri korunur
+	// (open create-dışında mode'a dokunmaz); yeni dosya 0644. Eski os.WriteFile(abs) resolved-
+	// string üzerinde çalışıp ara-dizin symlink takasıyla jail-dışına yazmaya kandırılabilirdi.
+	if err := writeBeneath(home, req.Yol, []byte(req.Icerik), 0644, sk); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
 		return
 	}
-	chown(abs, sk)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"yol":   req.Yol,
@@ -121,32 +113,23 @@ func (h *Handlers) Rename(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	eski, err := jailJoinStrict(home, req.Eski)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "kaynak: "+err.Error())
-		return
-	}
-	yeni, err := jailJoinStrict(home, req.Yeni)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "hedef: "+err.Error())
-		return
-	}
-	if eski == home || yeni == home {
+	if p := relClean(req.Eski); p == "" || p == "." {
 		httpx.WriteError(w, http.StatusBadRequest, "ana ev dizini taşınamaz")
 		return
 	}
-	if _, err := os.Stat(eski); err != nil {
-		httpx.WriteError(w, http.StatusNotFound, "kaynak yok")
+	if p := relClean(req.Yeni); p == "" || p == "." {
+		httpx.WriteError(w, http.StatusBadRequest, "ana ev dizini taşınamaz")
 		return
 	}
-	// hedef dizini garanti et
-	_ = os.MkdirAll(filepath.Dir(yeni), 0755)
-	chown(filepath.Dir(yeni), sk)
-	if err := os.Rename(eski, yeni); err != nil {
+	// TOCTOU symlink-güvenli taşıma: kaynak+hedef PARENT'larını openat2 ile pinle, Renameat
+	// ile taşı (rename final-bileşen symlink'ini takip etmez). Hedef ara-dizinler O_NOFOLLOW
+	// mkdir-p ile oluşturulur (bkz. safeio.go). Eski os.Rename(eski, yeni) resolved-string'ler
+	// üzerinde çalışıp ara-dizin symlink takasıyla jail-dışına taşımaya kandırılabilirdi.
+	if err := renameBeneath(home, req.Eski, req.Yeni, sk); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "rename: "+err.Error())
 		return
 	}
-	chown(yeni, sk)
+	_ = chownTreeBeneath(home, req.Yeni, sk) // taşınan öğeyi tenant'a chown (symlink-güvenli)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "eski": req.Eski, "yeni": req.Yeni})
 }
 
@@ -168,22 +151,20 @@ func (h *Handlers) Chmod(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	abs, err := jailJoinStrict(home, req.Yol)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	mod := strings.TrimPrefix(req.Mod, "0")
 	n, err := strconv.ParseUint(mod, 8, 32)
 	if err != nil || n > 0o777 {
 		httpx.WriteError(w, http.StatusBadRequest, "mod oktal olmalı (0000-0777)")
 		return
 	}
-	if err := os.Chmod(abs, os.FileMode(n)); err != nil {
+	// TOCTOU symlink-güvenli chmod: hedefi openat2 ile aç (ara-bileşen/leaf symlink REDDEDİLİR),
+	// Fchmod (bkz. safeio.go). Eski os.Chmod(abs) resolved-string üzerinde çalışıp ara-dizin
+	// symlink takasıyla jail-dışı (ör. /etc) dosyaya chmod'a kandırılabilirdi (LPE).
+	if err := chmodBeneath(home, req.Yol, uint32(n)); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "chmod: "+err.Error())
 		return
 	}
-	chown(abs, sk) // sahiplik domain user'ında kalsın + SELinux context'i düzelt
+	_ = chownTreeBeneath(home, req.Yol, sk) // sahiplik domain user'ında kalsın (symlink-güvenli)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "yol": req.Yol, "mod": req.Mod})
 }
 
@@ -322,13 +303,9 @@ func (h *Handlers) bulkMoveCopy(w http.ResponseWriter, r *http.Request, move boo
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	hedefAbs, err := jailJoinStrict(home, req.Hedef)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "hedef: "+err.Error())
-		return
-	}
-	info, err := os.Stat(hedefAbs)
-	if err != nil || !info.IsDir() {
+	// TOCTOU symlink-güvenli: hedef klasörü openat2 ile doğrula (ara-bileşen symlink REDDEDİLİR).
+	hedefRel := relClean(req.Hedef)
+	if ok, err := isDirBeneath(home, hedefRel); err != nil || !ok {
 		httpx.WriteError(w, http.StatusBadRequest, "hedef klasör değil")
 		return
 	}
@@ -336,27 +313,29 @@ func (h *Handlers) bulkMoveCopy(w http.ResponseWriter, r *http.Request, move boo
 	basarili := 0
 	hatalar := []string{}
 	for _, k := range req.Kaynaklar {
-		kAbs, err := jailJoinStrict(home, k)
-		if err != nil {
-			hatalar = append(hatalar, k+": "+err.Error())
+		kRel := relClean(k)
+		if kRel == "" || kRel == "." {
+			hatalar = append(hatalar, k+": geçersiz kaynak")
 			continue
 		}
-		dst := filepath.Join(hedefAbs, filepath.Base(kAbs))
-		if dst == kAbs {
+		dstRel := filepath.Join(hedefRel, filepath.Base(kRel))
+		if dstRel == kRel {
 			hatalar = append(hatalar, k+": kaynak ve hedef aynı")
 			continue
 		}
+		// Symlink-güvenli taşı/kopyala: parent'lar openat2 ile pinlenir, hiçbir symlink takip
+		// edilmez; kopyada jail-dışı symlink İÇERİĞİ okunmaz (bilgi sızması yok) (bkz. safeio.go).
 		var op error
 		if move {
-			op = os.Rename(kAbs, dst)
+			op = renameBeneath(home, kRel, dstRel, sk)
 		} else {
-			op = copyAny(kAbs, dst)
+			op = copyTreeBeneath(home, kRel, dstRel, sk)
 		}
 		if op != nil {
 			hatalar = append(hatalar, k+": "+op.Error())
 			continue
 		}
-		_, _ = exec.Command("chown", "-R", sk+":"+sk, dst).CombinedOutput()
+		_ = chownTreeBeneath(home, dstRel, sk)
 		basarili++
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -364,53 +343,9 @@ func (h *Handlers) bulkMoveCopy(w http.ResponseWriter, r *http.Request, move boo
 	})
 }
 
-func copyAny(src, dst string) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		return copyDir(src, dst)
-	}
-	return copyFile(src, dst, info.Mode().Perm())
-}
-
-func copyFile(src, dst string, perm os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
-}
-
-func copyDir(src, dst string) error {
-	si, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, si.Mode().Perm()); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		s := filepath.Join(src, e.Name())
-		d := filepath.Join(dst, e.Name())
-		if err := copyAny(s, d); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// copyAny/copyFile/copyDir KALDIRILDI: path-tabanlı eski kopya (os.Open/os.OpenFile string
+// yol üzerinde) TOCTOU symlink-yarışına açıktı. Kopya artık safeio.go'daki symlink-güvenli
+// copyTreeBeneath (openat2 + O_NOFOLLOW, jail-dışı symlink içeriğini sızdırmaz) ile yapılır.
 
 // ----- Arşivle (seçili dosyaları zip yap) -----
 
@@ -508,22 +443,17 @@ func (h *Handlers) YeniDosya(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	abs, err := jailJoinStrict(home, req.Yol)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if _, err := os.Stat(abs); err == nil {
-		httpx.WriteError(w, http.StatusConflict, "dosya zaten var")
-		return
-	}
-	f, err := os.OpenFile(abs, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
-	if err != nil {
+	// TOCTOU symlink-güvenli yeni-dosya: openat2 + O_EXCL (ara-bileşen/leaf symlink REDDEDİLİR),
+	// fd üzerinden tenant'a chown (bkz. safeio.go). Eski os.Stat+os.OpenFile(abs) resolved-string
+	// üzerinde çalışıp ara-dizin symlink takasına açıktı.
+	if err := createExclBeneath(home, req.Yol, sk); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			httpx.WriteError(w, http.StatusConflict, "dosya zaten var")
+			return
+		}
 		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
 		return
 	}
-	f.Close()
-	chown(abs, sk)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "yol": req.Yol})
 }
 

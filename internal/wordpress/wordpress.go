@@ -398,7 +398,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /domains/{id}/wordpress  {dizin, db_sil}
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
-	_, sk, _, _, demo, ok := h.domain(r)
+	domID, sk, _, _, demo, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -431,7 +431,15 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		if b, err := os.ReadFile(filepath.Join(dir, "wp-config.php")); err == nil {
 			if m := reDBName.FindSubmatch(b); len(m) == 2 {
 				dbName := string(m[1])
-				if strings.HasPrefix(dbName, "wp_") { // sadece bizim oluşturduğumuz WP DB'lerini düşür
+				// GÜVENLİK (tenant-arası DROP koruması): dbName müşterinin KENDİ
+				// wp-config.php'sinden okunur → GÜVENİLMEZ. İki katman gerekir:
+				//  1) dbAdiWPGuard: GecerliDBKimlik(^[A-Za-z0-9_]{1,64}$) + "wp_" öneki →
+				//     backtick/tırnak/boşluk/; kaçışları ve wp_-dışı adlar REDDEDİLİR.
+				//  2) SAHİPLİK: db_accounts'ta (db_name=? AND domain_id=?) satırı olmalı →
+				//     müşteri wp-config'e "wp_baskatenant" yazsa bile o DB bu domaine kayıtlı
+				//     değilse DROP YAPILMAZ (başka tenant'ın DB'sini düşürme engellenir).
+				sahip := func(n string, d int64) (bool, error) { return h.dbSahipMi(r.Context(), n, d) }
+				if dropIzinli(dbName, domID, sahip) {
 					_, _ = h.DB.Exec("DROP DATABASE IF EXISTS `" + dbName + "`")
 				}
 			}
@@ -461,6 +469,32 @@ func cozDizin(sk, dizinStr string) (string, error) {
 		return "", fmt.Errorf("bu dizinde WordPress bulunamadı")
 	}
 	return clean, nil
+}
+
+// dbAdiWPGuard: DROP için AD-güvenlik kapısı (sahiplikten ayrı, saf → birim-test edilebilir).
+// GecerliDBKimlik (^[A-Za-z0-9_]{1,64}$) → backtick/tırnak/boşluk/;/SQLi kaçışı kapalı;
+// ayrıca yalnız bizim oluşturduğumuz "wp_" önekli DB'leri hedefler.
+func dbAdiWPGuard(dbName string) bool {
+	return hesaplar.GecerliDBKimlik(dbName) && strings.HasPrefix(dbName, "wp_")
+}
+
+// dropIzinli: dbName DROP edilebilir mi? Ad-guard'ı geçmeli VE sahiplik-sorgusu bu DB'nin
+// gerçekten bu domaine ait olduğunu doğrulamalı. sahip enjekte edilebilir (birim-test için).
+func dropIzinli(dbName string, domainID int64, sahip func(string, int64) (bool, error)) bool {
+	if !dbAdiWPGuard(dbName) {
+		return false
+	}
+	ok, err := sahip(dbName, domainID)
+	return err == nil && ok
+}
+
+// dbSahipMi: dbName GERÇEKTEN bu domain'e ait mi? db_accounts sahiplik kontrolü. Panel'in
+// oluşturduğu WP DB'leri hesaplar.MySQLCreateDB ile domain_id'li db_accounts'a kaydedilir.
+func (h *Handlers) dbSahipMi(ctx context.Context, dbName string, domainID int64) (bool, error) {
+	var n int
+	err := h.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM db_accounts WHERE db_name=? AND domain_id=?`, dbName, domainID).Scan(&n)
+	return n > 0, err
 }
 
 func randSlug() string {
