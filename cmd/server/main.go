@@ -388,7 +388,7 @@ func main() {
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Minute, // buyuk upload icin genis ust sinir (slowloris ust siniri kalir)
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      30 * time.Minute, // buyuk upload/download: yanit yazma deadline-i erken gecmesin
 		IdleTimeout:       120 * time.Second,
 	}
 
