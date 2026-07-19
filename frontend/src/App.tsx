@@ -29,6 +29,7 @@ import DomainPHPPage from '@/pages/DomainPHPPage'
 import DomainBackupsPage from '@/pages/DomainBackupsPage'
 import DomainGitPage from '@/pages/DomainGitPage'
 import DomainWebSunucuPage from '@/pages/DomainWebSunucuPage'
+import DomainWafPage from '@/pages/DomainWafPage'
 import PHPModuleriPage from '@/pages/PHPModuleriPage'
 import PaketlerPage from '@/pages/PaketlerPage'
 import PaketDetayPage from '@/pages/PaketDetayPage'
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="abonelikler/:id/yedekler"      element={<DomainBackupsPage />} />
         <Route path="abonelikler/:id/git"           element={<DomainGitPage />} />
         <Route path="abonelikler/:id/web-sunucu"    element={<DomainWebSunucuPage />} />
+        <Route path="abonelikler/:id/waf"           element={<DomainWafPage />} />
         <Route path="sistem/php-modulleri"           element={<PHPModuleriPage />} />
         <Route path="araclar/paketler"               element={<PaketlerPage />} />
         <Route path="araclar/paketler/:id"           element={<PaketDetayPage />} />

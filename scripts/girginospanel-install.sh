@@ -253,6 +253,9 @@ restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null
 step "11) Valkey (Redis) + performans tuning"
 command -v girginospanel-redis-setup >/dev/null 2>&1 && girginospanel-redis-setup >/dev/null 2>&1 && ok "girginospanel-redis-setup" || warn "redis-setup atlandı"
 command -v girginospanel-optimize >/dev/null 2>&1 && girginospanel-optimize >/dev/null 2>&1 && ok "girginospanel-optimize" || warn "optimize atlandı"
+# WAF (ModSecurity + OWASP CRS) altyapısı — idempotent, per-domain opt-in (modül yükleme zararsız).
+# İlk kurulumda connector derlemesi birkaç dakika sürebilir; başarısız olursa kurulum durmaz.
+command -v girginospanel-waf-setup >/dev/null 2>&1 && girginospanel-waf-setup >/dev/null 2>&1 && ok "girginospanel-waf-setup (ModSecurity+CRS)" || warn "waf-setup atlandı (panel WAF modülsüz graceful çalışır)"
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
 step "12) Panel başlatılıyor"

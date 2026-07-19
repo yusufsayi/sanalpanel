@@ -45,8 +45,12 @@ type Plan struct {
 	FastCgiCache       bool   `json:"fastcgi_cache"`
 	ClientMaxBodyMB    int    `json:"client_max_body_mb"`
 	NginxEkDirektifler string `json:"nginx_ek_direktifler"`
-	Varsayilan         bool   `json:"varsayilan"`
-	Olusturulma        string `json:"olusturulma"`
+	// WAF (ModSecurity + OWASP CRS) plan varsayilani — bu plandaki domainler devralir.
+	WafEnabled  bool   `json:"waf_enabled"`  // plan varsayilani WAF acik mi
+	WafMode     string `json:"waf_mode"`     // "on" (engelle) | "detect" (yalniz kaydet) | "off"
+	WafParanoia int    `json:"waf_paranoia"` // CRS paranoia 1..4
+	Varsayilan  bool   `json:"varsayilan"`
+	Olusturulma string `json:"olusturulma"`
 }
 
 type Handlers struct {
@@ -59,7 +63,9 @@ const selectAll = `SELECT id, ad, aciklama, disk_kota_mb, trafik_kota_mb,
   COALESCE(pm_max_children,0),
   COALESCE(io_read_mbps,0), COALESCE(io_write_mbps,0), COALESCE(io_read_iops,0), COALESCE(io_write_iops,0),
   COALESCE(db_max_queries_per_hour,0), COALESCE(db_max_updates_per_hour,0), COALESCE(db_max_query_seconds,0),
-  php_surum, fastcgi_cache, client_max_body_mb, COALESCE(nginx_ek_direktifler,''), varsayilan, DATE_FORMAT(created_at,'%Y-%m-%d') FROM service_plans`
+  php_surum, fastcgi_cache, client_max_body_mb, COALESCE(nginx_ek_direktifler,''),
+  COALESCE(waf_enabled,0), COALESCE(waf_mode,'on'), COALESCE(waf_paranoia,1),
+  varsayilan, DATE_FORMAT(created_at,'%Y-%m-%d') FROM service_plans`
 
 func b01(b bool) int {
 	if b {
@@ -70,16 +76,19 @@ func b01(b bool) int {
 
 func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 	var p Plan
-	var vars, fc int
+	var vars, fc, wafEn int
 	err := rs.Scan(&p.ID, &p.Ad, &p.Aciklama, &p.DiskKotaMB, &p.TrafikKotaMB,
 		&p.MaxDomain, &p.MaxDB, &p.MaxEmail, &p.MaxFTP,
 		&p.CPUYuzde, &p.RAMMB, &p.MaxProcess, &p.InodeKota, &p.IOAgirlik, &p.MySQLMaxBaglanti,
 		&p.PMMaxChildren,
 		&p.IOReadMBps, &p.IOWriteMBps, &p.IOReadIOPS, &p.IOWriteIOPS,
 		&p.DBMaxQueriesPerHr, &p.DBMaxUpdatesPerHr, &p.DBMaxQuerySeconds,
-		&p.PHPSurum, &fc, &p.ClientMaxBodyMB, &p.NginxEkDirektifler, &vars, &p.Olusturulma)
+		&p.PHPSurum, &fc, &p.ClientMaxBodyMB, &p.NginxEkDirektifler,
+		&wafEn, &p.WafMode, &p.WafParanoia,
+		&vars, &p.Olusturulma)
 	p.Varsayilan = vars == 1
 	p.FastCgiCache = fc == 1
+	p.WafEnabled = wafEn == 1
 	return p, err
 }
 
@@ -149,6 +158,16 @@ func varsayilanDoldur(p *Plan) {
 	if p.ClientMaxBodyMB == 0 {
 		p.ClientMaxBodyMB = 64
 	}
+	// WAF varsayilanlari
+	switch strings.ToLower(strings.TrimSpace(p.WafMode)) {
+	case "on", "detect", "off":
+		p.WafMode = strings.ToLower(strings.TrimSpace(p.WafMode))
+	default:
+		p.WafMode = "on"
+	}
+	if p.WafParanoia < 1 || p.WafParanoia > 4 {
+		p.WafParanoia = 1
+	}
 }
 
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
@@ -179,15 +198,17 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		   pm_max_children,
 		   io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
 		   db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
-		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
+		   waf_enabled, waf_mode, waf_paranoia, varsayilan)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
 		p.DBMaxQueriesPerHr, p.DBMaxUpdatesPerHr, p.DBMaxQuerySeconds,
-		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v)
+		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler,
+		b01(p.WafEnabled), p.WafMode, p.WafParanoia, v)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -227,7 +248,8 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		   pm_max_children=?,
 		   io_read_mbps=?, io_write_mbps=?, io_read_iops=?, io_write_iops=?,
 		   db_max_queries_per_hour=?, db_max_updates_per_hour=?, db_max_query_seconds=?,
-		   php_surum=?, fastcgi_cache=?, client_max_body_mb=?, nginx_ek_direktifler=?, varsayilan=?
+		   php_surum=?, fastcgi_cache=?, client_max_body_mb=?, nginx_ek_direktifler=?,
+		   waf_enabled=?, waf_mode=?, waf_paranoia=?, varsayilan=?
 		 WHERE id=?`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
@@ -235,13 +257,40 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
 		p.DBMaxQueriesPerHr, p.DBMaxUpdatesPerHr, p.DBMaxQuerySeconds,
-		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler, v, id); err != nil {
+		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler,
+		b01(p.WafEnabled), p.WafMode, p.WafParanoia, v, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Plan WAF varsayilani degismis olabilir → bu plandaki (domain override'i olmayan)
+	// domainlerin vhost'unu arka planda yeniden render et ki WAF direktifi guncellensin.
+	// (nginx -t gate + rollback her render'da korur; hata log'lanir, panel bloklanmaz.)
+	go h.wafPlanReapply(id)
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
 	saved, _ := scan(row)
 	httpx.WriteJSON(w, http.StatusOK, saved)
+}
+
+// wafPlanReapply: bu plana bagli tum domainlerin WAF ayarini (plan varsayilanini devralanlar
+// dahil) yeniden uygular. Arka plan goroutine — kendi baglaminda calisir.
+func (h *Handlers) wafPlanReapply(planID int64) {
+	rows, err := h.DB.Query(`SELECT id FROM domains WHERE plan_id=?`, planID)
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var did int64
+		if rows.Scan(&did) == nil {
+			ids = append(ids, did)
+		}
+	}
+	rows.Close()
+	for _, did := range ids {
+		if err := provisioner.WAFUygula(h.DB, did); err != nil {
+			log.Printf("waf plan reapply domain=%d: %v", did, err)
+		}
+	}
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {

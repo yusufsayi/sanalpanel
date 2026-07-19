@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# girginospanel-waf-setup — ModSecurity v3 + OWASP CRS kurulumu (IDEMPOTENT).
+#
+#   girginospanel-waf-setup            # eksikleri kur; her sey hazirsa hizlica cik
+#   girginospanel-waf-setup --force    # connector'i yeniden derle (nginx ABI degisti sansa karsi)
+#   girginospanel-waf-setup --status   # yalniz durum raporu, degisiklik yapma
+#
+# NE YAPAR (yalniz eksik olani):
+#   1) libmodsecurity v3 (yoksa kaynaktan derle → /usr/local/modsecurity)
+#   2) ModSecurity-nginx connector'i CALISAN nginx surumuyle BIREBIR derle → dinamik .so
+#   3) OWASP CRS + /etc/nginx/modsec konfigleri (modsecurity.conf, crs-setup.conf, main.conf)
+#   4) Modulu nginx.conf MAIN-context'ine load_module ile yukle
+#      🔴 nginx -t GATE + otomatik ROLLBACK: -t patlarsa nginx.conf geri alinir (TUM nginx
+#         cokmesin). Modul yuklemek ZARARSIZDIR: bir vhost "modsecurity on" demedikce
+#         davranis degismez → WAF per-domain opt-in (panel yonetir).
+#
+# KORUR: mevcut vhost'lar, siteler, CRS ozel kurallari. Yeniden calistirmak guvenli.
+set -uo pipefail
+
+# ---- sabitler ----
+MODSEC_VER=v3.0.14
+CONNECTOR_VER=v1.0.3
+CRS_VER=v4.28.0
+MODSEC_PREFIX=/usr/local/modsecurity
+SRC=/usr/local/src
+MODSEC_DIR=/etc/nginx/modsec
+CRS_DIR=$MODSEC_DIR/crs
+DOMAINS_DIR=$MODSEC_DIR/domains
+MODULE_DIR=/usr/lib64/nginx/modules
+MODULE=$MODULE_DIR/ngx_http_modsecurity_module.so
+NGINX_CONF=/etc/nginx/nginx.conf
+ABI_STAMP=$MODSEC_DIR/.built_for_nginx
+AUDIT_LOG=/var/log/nginx/modsec_audit.log
+WORK_DIR=/var/cache/nginx/modsec
+LOADLINE="load_module $MODULE;"
+MARK="# girginospanel-waf: ModSecurity modulu (main-context, per-domain opt-in)"
+
+FORCE=0; STATUS=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force) FORCE=1 ;;
+    --status) STATUS=1 ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "bilinmeyen arg: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+c_b="\033[1;34m"; c_g="\033[32m"; c_r="\033[31m"; c_y="\033[33m"; c_0="\033[0m"
+[ -t 1 ] || { c_b=; c_g=; c_r=; c_y=; c_0=; }
+ok()   { echo -e "  ${c_g}✓${c_0} $*"; }
+warn() { echo -e "  ${c_y}!${c_0} $*"; }
+die()  { echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
+step() { echo -e "${c_b}══ $* ══${c_0}"; }
+
+[ "$(id -u)" = 0 ] || die "root gerekli"
+command -v nginx >/dev/null || die "nginx bulunamadi"
+NGVER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+[ -n "$NGVER" ] || die "nginx surumu okunamadi"
+
+# ---- durum ----
+have_lib() { [ -e "$MODSEC_PREFIX/lib/libmodsecurity.so" ]; }
+have_module() { [ -f "$MODULE" ]; }
+abi_ok() { [ -f "$ABI_STAMP" ] && [ "$(cat "$ABI_STAMP" 2>/dev/null)" = "$NGVER" ]; }
+have_crs() { [ -f "$CRS_DIR/crs-setup.conf" ] && [ -d "$CRS_DIR/rules" ]; }
+module_loaded() { grep -qF "ngx_http_modsecurity_module.so" "$NGINX_CONF" 2>/dev/null; }
+
+if [ "$STATUS" = 1 ]; then
+  step "WAF durum (nginx $NGVER)"
+  have_lib     && ok "libmodsecurity: kurulu" || warn "libmodsecurity: YOK"
+  have_module  && ok "connector .so: kurulu ($(abi_ok && echo "ABI=$NGVER uyumlu" || echo "ABI stamp farkli/yok"))" || warn "connector .so: YOK"
+  have_crs     && ok "OWASP CRS: kurulu" || warn "OWASP CRS: YOK"
+  module_loaded && ok "nginx.conf load_module: VAR" || warn "nginx.conf load_module: YOK"
+  exit 0
+fi
+
+step "GirginOSPanel WAF kurulum (ModSecurity $MODSEC_VER + CRS $CRS_VER, nginx $NGVER)"
+
+# Her sey hazir + ABI uyumlu + zorlanmiyorsa → hizli cik (agir derleme atlanir).
+if have_lib && have_module && abi_ok && have_crs && module_loaded && [ "$FORCE" = 0 ]; then
+  ok "her sey hazir + nginx ABI ($NGVER) uyumlu — yapilacak bir sey yok (--force ile yeniden derle)"
+  exit 0
+fi
+
+# ---- 1) libmodsecurity (yoksa derle — AGIR) ----
+if ! have_lib; then
+  step "libmodsecurity $MODSEC_VER derleniyor (agir, birkac dakika)"
+  dnf install -y gcc-c++ make automake libtool pkgconf-pkg-config flex bison wget git \
+    libxml2-devel pcre2-devel libcurl-devel lmdb-devel openssl-devel >/dev/null 2>&1 || \
+    warn "bazi bagimliliklar kurulamadi — derleme yine denenecek"
+  rm -rf "$SRC/ModSecurity"
+  git clone -b "$MODSEC_VER" --depth 1 https://github.com/owasp-modsecurity/ModSecurity "$SRC/ModSecurity" \
+    || die "ModSecurity klonlanamadi"
+  cd "$SRC/ModSecurity"
+  git submodule update --init --recursive --depth 1 >/dev/null 2>&1 || warn "submodule uyarisi"
+  ./build.sh >/dev/null 2>&1 || die "build.sh basarisiz"
+  ./configure --prefix="$MODSEC_PREFIX" --with-pcre2 >/dev/null 2>&1 || die "configure basarisiz (PCRE2)"
+  make -j"$(nproc)" >/dev/null 2>&1 || die "libmodsecurity make basarisiz"
+  make install >/dev/null 2>&1 || die "libmodsecurity make install basarisiz"
+  ok "libmodsecurity kuruldu ($MODSEC_PREFIX)"
+else
+  ok "libmodsecurity zaten kurulu ($MODSEC_PREFIX) — atlaniyor"
+fi
+
+# runtime linker libmodsecurity.so.3'u bulabilsin (module dlopen + calisma zamani)
+if [ ! -f /etc/ld.so.conf.d/modsecurity.conf ] || ! grep -q "$MODSEC_PREFIX/lib" /etc/ld.so.conf.d/modsecurity.conf 2>/dev/null; then
+  echo "$MODSEC_PREFIX/lib" > /etc/ld.so.conf.d/modsecurity.conf
+fi
+ldconfig
+
+# ---- 2) connector (.so) — CALISAN nginx surumuyle BIREBIR ----
+if ! have_module || ! abi_ok || [ "$FORCE" = 1 ]; then
+  step "ModSecurity-nginx connector derleniyor (nginx $NGVER ile birebir)"
+  dnf install -y gcc make wget git pcre2-devel zlib-devel openssl-devel >/dev/null 2>&1 || true
+  [ -d "$SRC/ModSecurity-nginx" ] || \
+    git clone -b "$CONNECTOR_VER" --depth 1 https://github.com/owasp-modsecurity/ModSecurity-nginx "$SRC/ModSecurity-nginx" \
+      || die "ModSecurity-nginx klonlanamadi"
+  cd "$SRC"
+  if [ ! -d "$SRC/nginx-$NGVER" ]; then
+    wget -qO "$SRC/nginx-$NGVER.tar.gz" "https://nginx.org/download/nginx-$NGVER.tar.gz" \
+      || die "nginx-$NGVER kaynagi indirilemedi"
+    tar xzf "$SRC/nginx-$NGVER.tar.gz" -C "$SRC" || die "nginx kaynak acilamadi"
+  fi
+  cd "$SRC/nginx-$NGVER"
+  export MODSECURITY_INC="$MODSEC_PREFIX/include"
+  export MODSECURITY_LIB="$MODSEC_PREFIX/lib"
+  ./configure --with-compat --add-dynamic-module=../ModSecurity-nginx >/tmp/waf-configure.log 2>&1 \
+    || { tail -20 /tmp/waf-configure.log; die "connector configure basarisiz (bkz /tmp/waf-configure.log)"; }
+  make modules >/tmp/waf-make.log 2>&1 \
+    || { tail -20 /tmp/waf-make.log; die "make modules basarisiz (bkz /tmp/waf-make.log)"; }
+  [ -f objs/ngx_http_modsecurity_module.so ] || die "modul uretilmedi"
+  mkdir -p "$MODULE_DIR"
+  install -m 0644 objs/ngx_http_modsecurity_module.so "$MODULE"
+  strip "$MODULE" 2>/dev/null || true
+  echo "$NGVER" > "$ABI_STAMP"
+  ok "connector kuruldu ($MODULE, $(du -h "$MODULE" | cut -f1), ABI=$NGVER)"
+else
+  ok "connector zaten kurulu + ABI ($NGVER) uyumlu — atlaniyor"
+fi
+
+# ---- 3) /etc/nginx/modsec konfigleri + CRS ----
+step "OWASP CRS + konfigler"
+mkdir -p "$MODSEC_DIR" "$DOMAINS_DIR" "$WORK_DIR"
+
+# CRS (yoksa klonla; VARSA ozel kurallari koru — dokunma)
+if ! have_crs; then
+  rm -rf "$CRS_DIR"
+  git clone -b "$CRS_VER" --depth 1 https://github.com/coreruleset/coreruleset "$CRS_DIR" \
+    || die "OWASP CRS klonlanamadi"
+  ok "CRS $CRS_VER klonlandi ($CRS_DIR)"
+else
+  ok "CRS zaten kurulu — korunuyor"
+fi
+# crs-setup.conf (yoksa ornek dosyadan; paranoia SecAction'i ornekte VARSAYILAN yorumlu →
+# per-domain conf id:900000 ile paranoia set eder, cakisma yok)
+if [ ! -f "$CRS_DIR/crs-setup.conf" ]; then
+  [ -f "$CRS_DIR/crs-setup.conf.example" ] && cp "$CRS_DIR/crs-setup.conf.example" "$CRS_DIR/crs-setup.conf" \
+    || die "crs-setup.conf.example yok"
+  ok "crs-setup.conf olusturuldu"
+fi
+
+# modsecurity.conf (temel yapilandirma — per-domain SecRuleEngine BUNU override eder)
+cat > "$MODSEC_DIR/modsecurity.conf" <<MODSECEOF
+# GirginOSPanel — ModSecurity temel yapilandirmasi.
+# NOT: SecRuleEngine burada DetectionOnly; per-domain conf (Include sonrasi) On/DetectionOnly
+# olarak override eder → gercek mod her zaman panel ayarindan gelir.
+SecRuleEngine DetectionOnly
+SecRequestBodyAccess On
+SecRequestBodyLimit 13107200
+SecRequestBodyNoFilesLimit 131072
+SecRequestBodyLimitAction Reject
+SecRequestBodyJsonDepthLimit 512
+SecResponseBodyAccess On
+SecResponseBodyMimeType text/plain text/html text/xml application/json
+SecResponseBodyLimit 1048576
+SecResponseBodyLimitAction ProcessPartial
+SecTmpDir $WORK_DIR
+SecDataDir $WORK_DIR
+SecAuditEngine RelevantOnly
+SecAuditLogRelevantStatus "^(?:5|4(?!04))"
+SecAuditLogParts ABIJDEFHZ
+SecAuditLogType Serial
+SecAuditLog $AUDIT_LOG
+SecArgumentSeparator &
+SecCookieFormat 0
+SecStatusEngine Off
+SecPcreMatchLimit 100000
+SecPcreMatchLimitRecursion 100000
+MODSECEOF
+
+# main.conf — GLOBAL varsayilan referans paketi (per-domain conf'lar bunun parcalarini kullanir).
+cat > "$MODSEC_DIR/main.conf" <<MAINEOF
+# GirginOSPanel — WAF global referans (per-domain conf'lar /etc/nginx/modsec/domains/<sk>.conf).
+# Bu dosya dogrudan bir vhost'a baglanmaz; tam kural paketini tek yerde gormek icindir.
+Include $MODSEC_DIR/modsecurity.conf
+Include $CRS_DIR/crs-setup.conf
+Include $CRS_DIR/rules/*.conf
+MAINEOF
+ok "modsecurity.conf + main.conf yazildi"
+
+# audit log + work dir yazilabilir (nginx user) + SELinux context
+[ -f "$AUDIT_LOG" ] || : > "$AUDIT_LOG"
+chown nginx:nginx "$AUDIT_LOG" 2>/dev/null || true
+chown -R nginx:nginx "$WORK_DIR" 2>/dev/null || true
+chmod 0750 "$WORK_DIR" 2>/dev/null || true
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; then
+  command -v restorecon >/dev/null 2>&1 && restorecon -R "$AUDIT_LOG" "$WORK_DIR" >/dev/null 2>&1 || true
+  # nginx'in $WORK_DIR (cache_t) icine yazabilmesi zaten httpd_cache_t ile kaplidir.
+fi
+
+# ---- 4) modulu nginx.conf MAIN-context'ine yukle (nginx -t GATE + ROLLBACK) ----
+step "Modul yukleme (nginx -t gate + rollback)"
+if module_loaded; then
+  ok "load_module zaten nginx.conf'ta — atlaniyor"
+else
+  cp -a "$NGINX_CONF" "$NGINX_CONF.waf-bak"
+  # include /usr/share/nginx/modules/*.conf; satirindan SONRA ekle; yoksa dosya basina.
+  if grep -qE '^\s*include\s+/usr/share/nginx/modules/\*\.conf;' "$NGINX_CONF"; then
+    awk -v mark="$MARK" -v load="$LOADLINE" '
+      { print }
+      $0 ~ /include \/usr\/share\/nginx\/modules\/\*\.conf;/ && !d { print mark; print load; d=1 }
+    ' "$NGINX_CONF" > "$NGINX_CONF.wafnew"
+  else
+    { echo "$MARK"; echo "$LOADLINE"; cat "$NGINX_CONF"; } > "$NGINX_CONF.wafnew"
+  fi
+  if ! grep -qF "ngx_http_modsecurity_module.so" "$NGINX_CONF.wafnew"; then
+    rm -f "$NGINX_CONF.wafnew" "$NGINX_CONF.waf-bak"
+    die "load_module satiri eklenemedi (nginx.conf yapisi beklenmedik) — dokunulmadi"
+  fi
+  mv -f "$NGINX_CONF.wafnew" "$NGINX_CONF"
+  if nginx -t >/tmp/waf-nginx-t.log 2>&1; then
+    rm -f "$NGINX_CONF.waf-bak"
+    systemctl reload nginx >/dev/null 2>&1 || true
+    ok "modul yuklendi + nginx -t OK + reload"
+  else
+    # 🔴 ROLLBACK: -t patladi → nginx.conf geri al (TUM nginx cokmesin)
+    mv -f "$NGINX_CONF.waf-bak" "$NGINX_CONF"
+    echo "---- nginx -t ----"; tail -15 /tmp/waf-nginx-t.log
+    die "nginx -t BASARISIZ — nginx.conf GERI ALINDI (nginx saglam). Modul yuklenmedi."
+  fi
+fi
+
+# son kontrol: main nginx hala -t OK olmali
+if nginx -t >/dev/null 2>&1; then
+  ok "ana nginx -t OK — kurulum tamam"
+else
+  die "beklenmeyen: kurulum sonrasi nginx -t basarisiz (elle kontrol: nginx -t)"
+fi
+
+step "WAF altyapisi HAZIR"
+echo "  • Modul yuklu (per-domain opt-in) — mevcut siteler ETKILENMEDI."
+echo "  • Panel: domain > Guvenlik > WAF ile ac/kapa + mod + paranoya."

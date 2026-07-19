@@ -14,6 +14,7 @@ type Plan = {
   db_max_queries_per_hour: number; db_max_updates_per_hour: number; db_max_query_seconds: number
   php_surum: string
   fastcgi_cache: boolean; client_max_body_mb: number; nginx_ek_direktifler: string
+  waf_enabled: boolean; waf_mode: string; waf_paranoia: number
   varsayilan: boolean; olusturulma: string
 }
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; durum: string; olusturulma: string }
@@ -250,6 +251,35 @@ export default function PaketDetayPage() {
           </Alan>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda <code className="font-mono">nginx -t</code> ile test edilir. Geçersizse plan <strong>kaydedilmez</strong> ve nginx'in hata çıktısı yukarıda gösterilir.
+          </p>
+        </Kart>
+
+        {/* WAF (ModSecurity + OWASP CRS) plan varsayılanı */}
+        <Kart baslik="Güvenlik Duvarı (WAF) Varsayılanı" ikon="🛡️" alt="ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Alan etiket="WAF Varsayılanı" ipucu="Bu plandaki yeni domainlerde WAF açık mı gelsin (per-domain override edilebilir).">
+              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+                <input type="checkbox" checked={plan.waf_enabled} onChange={e => P('waf_enabled', e.target.checked)} className="rounded" />
+                <span className="text-sm text-slate-700 dark:text-slate-300">Bu planda açık olsun</span>
+              </label>
+            </Alan>
+            <Alan etiket="Mod" ipucu="Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).">
+              <select value={plan.waf_mode} onChange={e => P('waf_mode', e.target.value)} className={inp} disabled={!plan.waf_enabled}>
+                <option value="on">Engelle (On)</option>
+                <option value="detect">Denetle (yalnızca kaydet)</option>
+              </select>
+            </Alan>
+            <Alan etiket="Paranoya Seviyesi" ipucu="CRS paranoia 1–4. Yüksek = daha sıkı koruma + daha çok yanlış-pozitif.">
+              <select value={plan.waf_paranoia} onChange={e => P('waf_paranoia', Number(e.target.value) || 1)} className={inp} disabled={!plan.waf_enabled}>
+                <option value={1}>Seviye 1 (Düşük — önerilen)</option>
+                <option value={2}>Seviye 2 (Orta)</option>
+                <option value={3}>Seviye 3 (Yüksek)</option>
+                <option value={4}>Seviye 4 (Sıkı)</option>
+              </select>
+            </Alan>
+          </div>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve <code className="font-mono">girginospanel-waf-setup</code> ile etkinleşir.
           </p>
         </Kart>
 

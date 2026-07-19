@@ -13,6 +13,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -66,6 +67,11 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
 			log.Printf("kaynaklimit apply domain=%d: %v", did, err)
+		}
+		// Plan degisti → WAF plan varsayilani da degismis olabilir; vhost'u WAF ile yeniden
+		// render et (domain override yoksa yeni planin WAF varsayilanini devralir).
+		if err := provisioner.WAFUygula(h.DB, did); err != nil {
+			log.Printf("waf apply (plan degisimi) domain=%d: %v", did, err)
 		}
 	}(id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "plan_id": req.PlanID})

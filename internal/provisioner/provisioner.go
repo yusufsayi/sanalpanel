@@ -53,6 +53,7 @@ func Init(d *sql.DB) {
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
 	EnsureTenantFPMOnStartup()  // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
+	HealWAFOnStartup()          // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -278,7 +279,7 @@ server {
 
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
-{{.DenyBlocks}}
+{{.ModSec}}{{.DenyBlocks}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -354,7 +355,7 @@ server {
 
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
-    location /.well-known/acme-challenge/ {
+{{.ModSec}}    location /.well-known/acme-challenge/ {
         root /var/www/_acme;
         auth_basic off;
         try_files $uri =404;
@@ -590,6 +591,7 @@ type VhostOpts struct {
 	// Render-time hesaplanan alanlar (DB'de TUTULMAZ). renderAndReload icinde set edilir.
 	SecHeaders string // guvenlik add_header blogu (her location'a enjekte edilir)
 	DenyBlocks string // CGI/betik + yedek/dump dosya deny location'lari
+	ModSec     string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
 }
 
 func (o VhostOpts) SSL() bool {
@@ -684,6 +686,13 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
 	opts.SecHeaders = buildSecurityHeaders(opts)
 	opts.DenyBlocks = denyBlocksNginx
+	// WAF (ModSecurity) direktifi: her render'da efektif ayardan hesapla. Askidayken
+	// suspend vhost'u (ModSec alani yok) render edilir → hesaplama gereksiz.
+	// buildModSec, WAF pasif/modul yoksa "" doner (vhost'u bozmaz) ve aktifse per-domain
+	// modsec conf dosyasini da tazeler → tek kaynak: her render self-healing.
+	if !opts.Askida {
+		opts.ModSec = buildModSec(sk)
+	}
 
 	var buf bytes.Buffer
 	tmpl := vhostTmpl
@@ -826,6 +835,11 @@ func Deprovision(alanAdi, sk string) error {
 		for _, s := range subs {
 			_ = os.Remove(s)
 		}
+	}
+	// WAF per-domain modsec conf'larini temizle (orphan kalmasin).
+	if reWafSK.MatchString(sk) {
+		_ = os.Remove(filepath.Join(wafDomainsDir, sk+".conf"))
+		_ = os.Remove(filepath.Join(wafDomainsDir, sk+".custom.conf"))
 	}
 	// Per-tenant FPM (Seçenek A) izlerini kaldır (servis + unit + config + run dizini + .bak).
 	TeardownTenantFPM(sk)

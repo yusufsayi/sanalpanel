@@ -171,6 +171,13 @@ if [ -d "$A/ops" ]; then
   ok "ops-tool'lar güncellendi"
 fi
 
+# 9b) WAF (ModSecurity + OWASP CRS) heal — IDEMPOTENT (her sey hazirsa saniyeler icinde ATLAR).
+# nginx sürümü değişmişse connector'ı ABI için yeniden derler. nginx -t GATE + rollback icerir →
+# ana nginx'i asla bozmaz. Modül yüklü değilse panel WAF'ı graceful atlar (site etkilenmez).
+if command -v girginospanel-waf-setup >/dev/null 2>&1; then
+  girginospanel-waf-setup >/dev/null 2>&1 && ok "WAF altyapısı senkron (ModSecurity+CRS)" || warn "waf-setup atlandı (WAF modülsüz graceful)"
+fi
+
 # 10) izolasyon + araç prereq (eski kurulumlarda yoksa gelsin; idempotent) + SELinux context
 command -v bwrap >/dev/null 2>&1 || dnf install -y bubblewrap >/dev/null 2>&1 || true
 # acl (setfacl): per-user dosya izin modeli (nginx user-ACL) için ŞART — yoksa panel fail-safe

@@ -52,6 +52,7 @@ import (
 	"girginospanel/internal/subdomain"
 	"girginospanel/internal/system"
 	"girginospanel/internal/users"
+	"girginospanel/internal/waf"
 	"girginospanel/internal/wordpress"
 
 	"github.com/go-chi/chi/v5"
@@ -147,6 +148,7 @@ func main() {
 	kopyaH := &sitekopya.Handlers{DB: d}
 	wpH := &wordpress.Handlers{DB: d}
 	fwH := &guvenlikduvari.Handlers{DB: d}
+	wafH := &waf.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
 	sshaccess.EnsureInfra()
@@ -350,6 +352,8 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/kaynak", kaynakH.Goster)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/nginx-settings", nginxsetH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/nginx-settings", nginxsetH.Kaydet)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/waf", wafH.Goster)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/waf", wafH.Kaydet)
 				r.With(middleware.AdminOnly).Get("/php-extensions", phpExtH.List)
 				r.With(middleware.AdminOnly).Put("/php-extensions/toggle", phpExtH.Toggle)
 				r.With(middleware.AdminOnly).Post("/php-extensions/pecl-install", phpExtH.PECLKur)
