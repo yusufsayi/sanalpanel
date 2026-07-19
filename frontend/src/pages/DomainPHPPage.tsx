@@ -18,6 +18,7 @@ type Ayarlar = {
   pm_strategy: string; pm_max_children: number; pm_max_requests: number
   pm_start_servers: number; pm_min_spare_servers: number; pm_max_spare_servers: number
   ek_direktifler: string
+  debug_mode: boolean
 }
 
 type Yanit = {
@@ -42,12 +43,14 @@ export default function DomainPHPPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
+  const [dlog, setDlog] = useState<string[]>([])
+  const [dlogYuk, setDlogYuk] = useState(false)
 
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
     api.get<Yanit>(`/domains/${id}/php-settings`)
-      .then(r => { setYanit(r.data); setSurum(r.data.php_surum); setA(r.data.ayarlar) })
+      .then(r => { setYanit(r.data); setSurum(r.data.php_surum); setA(r.data.ayarlar); debugLogYukle() })
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
   }
@@ -69,6 +72,32 @@ export default function DomainPHPPage() {
 
   function P<K extends keyof Ayarlar>(k: K, v: Ayarlar[K]) {
     if (!a) return; setA({ ...a, [k]: v })
+  }
+
+  async function debugLogYukle() {
+    if (!id) return
+    setDlogYuk(true)
+    try {
+      const { data } = await api.get<{ satirlar: string[] }>(`/domains/${id}/php/debug-log`)
+      setDlog(data.satirlar || [])
+    } catch {
+      setDlog([])
+    } finally {
+      setDlogYuk(false)
+    }
+  }
+
+  async function debugLogTemizle() {
+    if (!id) return
+    setDlogYuk(true); setHata(null)
+    try {
+      await api.delete(`/domains/${id}/php/debug-log`)
+      setDlog([])
+    } catch (e) {
+      setHata(apiHata(e, 'Debug log temizlenemedi'))
+    } finally {
+      setDlogYuk(false)
+    }
   }
 
   return (
@@ -180,6 +209,74 @@ export default function DomainPHPPage() {
             <Tek e="mail.force_extra_parameters" h="mail() fonksiyonu için ek parametreler">
               <Txt value={a.mail_force_extra_parameters} onChange={v => P('mail_force_extra_parameters', v)} mono />
             </Tek>
+          </Kart>
+
+          {/* PHP Debug Modu — master switch */}
+          <Kart baslik="PHP Debug Modu">
+            <div className="flex items-start gap-4">
+              <button onClick={() => P('debug_mode', !a.debug_mode)}
+                className={`flex-shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                title={a.debug_mode ? 'Debug modunu kapat' : 'Debug modunu ac'}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${a.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Debug modu</span>
+                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${a.debug_mode ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+                    {a.debug_mode ? 'Acik' : 'Kapali'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 leading-relaxed">
+                  Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip
+                  <code className="font-mono"> .gpanel/php_debug.log</code>'a kaydeder. Uygulama kendi <code className="font-mono">error_reporting(0)</code>'ini
+                  cagirsa bile fatal hatalar yine yakalanir.
+                </p>
+              </div>
+            </div>
+            {a.debug_mode && (
+              <div className="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
+                ⚠️ Debug modu acikken <strong>display_errors</strong> ve <strong>error_reporting = E_ALL</strong> zorlanir; hata detaylari ziyaretcilere gorunebilir.
+                Yalnizca sorun giderirken acin, canli sitede <strong>kapatin</strong>. Degisiklik <strong>Kaydet</strong>'ten sonra uygulanir.
+              </div>
+            )}
+          </Kart>
+
+          {/* Son Hatalar — debug log paneli */}
+          <Kart baslik="Son Hatalar (Debug Log)">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-xs text-slate-500 dark:text-slate-500 min-w-0 break-all">
+                En yeni fatal hatalar ustte. Kaynak: <code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code> (son 200 satir).
+              </p>
+              <div className="flex gap-2 flex-shrink-0">
+                <button onClick={debugLogYukle} disabled={dlogYuk}
+                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs rounded-md disabled:opacity-60">
+                  ↻ Yenile
+                </button>
+                <button onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
+                  className="px-3 py-1.5 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs rounded-md disabled:opacity-40">
+                  🗑 Temizle
+                </button>
+              </div>
+            </div>
+            {dlogYuk ? (
+              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">Yukleniyor…</div>
+            ) : dlog.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+                {a.debug_mode
+                  ? 'Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.'
+                  : 'Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.'}
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-950">
+                <ul className="divide-y divide-slate-800">
+                  {[...dlog].reverse().map((satir, i) => (
+                    <li key={i} className="px-3 py-1.5 text-[11px] font-mono text-red-300 whitespace-pre-wrap break-all leading-relaxed">
+                      {satir}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </Kart>
 
           {/* PHP-FPM */}
