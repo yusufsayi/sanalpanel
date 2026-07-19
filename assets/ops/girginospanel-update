@@ -152,10 +152,36 @@ install -m 0755 "$NEWBIN" "$BIN"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
 ok "binary güncellendi"
 
-# 7) frontend-dist
+# 7) frontend-dist — ATOMİK + DOĞRULANMIŞ swap.
+# Eski hata: `rm -rf "${FDIST:?}/"* && tar xzf ...` ÖNCE çalışan frontend'i siliyordu; extraction
+# kesilir ya da flush olmadan reboot olursa → 0-byte dosyalar → BEYAZ EKRAN outage (geri dönüş YOK).
+# Artık yeni sürüm ayrı bir geçici dizine açılır, bütünlüğü DOĞRULANIR, sonra atomik mv ile takas
+# edilir. Bozuk/kesik extraction çalışan frontend'e ASLA dokunmaz.
 if [ -f "$A/frontend-dist.tar.gz" ]; then
-  rm -rf "${FDIST:?}/"* && tar xzf "$A/frontend-dist.tar.gz" -C "$FDIST"
-  ok "frontend-dist güncellendi"
+  FDNEW="${FDIST}.new.$$"
+  # Bozuk extraction'da temizlik: geçici dizini sil + binary'yi (adım 6'da swap edilmişti) yedeğe
+  # geri al ki başarısız güncelleme on-disk'te de tam no-op olsun. Servis HENÜZ restart edilmedi
+  # (restart adım 11) → çalışan panel eski binary + eski frontend ile kesintisiz ayakta kalır.
+  fdist_abort() {
+    rm -rf "$FDNEW" 2>/dev/null || true
+    install -m 0755 "$BIN.bak" "$BIN" 2>/dev/null || true
+    [ -f "$SEED.bak" ] && install -m 0755 "$SEED.bak" "$SEED" 2>/dev/null || true
+    command -v restorecon >/dev/null && restorecon "$BIN" >/dev/null 2>&1 || true
+    die "$1"
+  }
+  rm -rf "$FDNEW"; mkdir -p "$FDNEW"
+  if ! tar xzf "$A/frontend-dist.tar.gz" -C "$FDNEW"; then
+    fdist_abort "frontend-dist extraction başarısız — mevcut frontend + eski binary KORUNDU"
+  fi
+  # bütünlük kapısı: index.html DOLU + en az bir JS bundle olmalı (0-byte/kesik tarball reddedilir)
+  if [ ! -s "$FDNEW/index.html" ] || ! ls "$FDNEW"/assets/index-*.js >/dev/null 2>&1; then
+    fdist_abort "frontend-dist bozuk (index.html/JS boş veya eksik) — mevcut frontend + eski binary KORUNDU"
+  fi
+  rm -rf "${FDIST}.old"
+  [ -d "$FDIST" ] && mv "$FDIST" "${FDIST}.old"
+  mv "$FDNEW" "$FDIST"
+  sync   # reboot-güvenli: delayed-alloc veri kaybını önlemek için diske flush et
+  ok "frontend-dist güncellendi (atomik doğrulanmış swap)"
 fi
 
 # 8) migration'lar (idempotent — startup'ta uygulanır). Adım 4'te dump'ı ALDIK.
