@@ -54,39 +54,94 @@ type Surum struct {
 	Aciklama    string `json:"aciklama,omitempty"`
 }
 
-// ---- Kurulabilirlik cache'i (dnf sorgusu pahalı; TTL ile önbelleğe alınır) ----
+// ---- Kurulabilirlik cache'i ----
+// 🔴 PERF: dnf shell-out'u pahalı (paket başına ~0.85s) ve dnf kilitli/yavaşken (ör. panel
+// update dnf çalıştırırken) SANİYELERCE asılabilir. Eskiden paketMevcut() bunu İSTEK
+// PATH'inde (senkron, 20s timeout) yapıyordu → TumSurumler() çağıran her endpoint (özellikle
+// Domains sayfasının /php/versions'ı) takılıyordu. Artık dnf SADECE arka-plan sweeper'da
+// çağrılır; istek path'i yalnızca cache OKUR, ASLA bloklamaz.
 var (
-	availMu    sync.Mutex
-	availCache = map[string]bool{}
-	availAt    time.Time
+	availMu     sync.Mutex
+	availCache  = map[string]bool{} // pkg -> kurulabilir mi (arka-plan sweep doldurur)
+	availAt     time.Time           // son başarılı sweep zamanı
+	sweeperOnce sync.Once
+	dnfProbe    = dnfPaketVar // test için enjekte edilebilir (varsayılan gerçek dnf)
 )
 
-const availTTL = 10 * time.Minute
+const (
+	availTTL   = 10 * time.Minute // arka-plan sweep periyodu
+	dnfTimeout = 3 * time.Second  // her dnf sorgusu için üst sınır (yalnızca sweeper)
+)
 
-// paketMevcut: phpXX-php-fpm paketi bu OS'ta (Remi) kurulabilir/kurulu mu? AppStream daima var.
-// Sonuç 10 dk cache'lenir (aynı sürüm tekrar tekrar dnf sorgulamasın).
+// StartAvailabilitySweeper: arka-plan dnf sweep döngüsünü (bir kez) başlatır. Sunucu
+// açılışında main'den çağrılır; idempotent. İlk sweep ile periyodik yenilemeyi goroutine'de yapar.
+func StartAvailabilitySweeper() {
+	sweeperOnce.Do(func() { go sweepLoop() })
+}
+
+// sweepLoop: açılışta bir kez + her availTTL'de bir tüm Remi paketlerinin kurulabilirliğini
+// dnf ile tarar ve availCache'i günceller. İstek path'inden BAĞIMSIZ çalışır.
+func sweepLoop() {
+	sweepOnce()
+	t := time.NewTicker(availTTL)
+	defer t.Stop()
+	for range t.C {
+		sweepOnce()
+	}
+}
+
+// sweepOnce: tek bir dnf tarama turu. Sonucu availCache'e atomik yazar (kısmi güncelleme yok).
+func sweepOnce() {
+	yeni := map[string]bool{}
+	for _, m := range DesteklenenSurumler {
+		if m.Kaynak != "remi" {
+			continue // appstream daima mevcut; dnf'e sormaya gerek yok
+		}
+		pkg := "php" + m.Kod + "-php-fpm"
+		if _, done := yeni[pkg]; done {
+			continue
+		}
+		yeni[pkg] = dnfProbe(pkg)
+	}
+	availMu.Lock()
+	availCache = yeni
+	availAt = time.Now()
+	availMu.Unlock()
+}
+
+// dnfPaketVar: TEK paket için dnf sorgusu (yalnızca arka-plan sweeper'dan çağrılır).
+// installed VEYA available → bulunursa dnf exit 0. Her sorgu dnfTimeout ile sınırlı; dnf
+// kilitli/yavaşsa 3sn'de vazgeçer (istek path'ini etkilemez, sadece sweep'i sınırlar).
+func dnfPaketVar(pkg string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), dnfTimeout)
+	defer cancel()
+	if exec.CommandContext(ctx, "dnf", "-q", "list", "--installed", pkg).Run() == nil {
+		return true
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), dnfTimeout)
+	defer cancel2()
+	return exec.CommandContext(ctx2, "dnf", "-q", "list", "--available", pkg).Run() == nil
+}
+
+// paketMevcut: phpXX-php-fpm paketi bu OS'ta (Remi) kurulabilir/kurulu mu?
+// 🔴 İSTEK PATH'i — ASLA dnf çağırmaz, yalnızca cache okur. AppStream daima var.
+// Cache boşsa (ilk boot, sweep henüz bitmemiş): makul varsayılan (false = "henüz bilinmiyor")
+// döner ve sweeper'ı garanti eder; istek ASLA saniyelerce beklemez. Sweep bitince gerçek
+// değer cache'e yazılır, sonraki istekler doğru sonucu anında alır.
 func paketMevcut(m SurumMeta) bool {
 	if m.Kaynak == "appstream" {
 		return true // sistem default her zaman mevcut
 	}
+	StartAvailabilitySweeper() // idempotent; boot'ta main zaten başlatır, burada güvence
 	pkg := "php" + m.Kod + "-php-fpm"
 	availMu.Lock()
-	defer availMu.Unlock()
-	if time.Since(availAt) >= availTTL {
-		availCache = map[string]bool{}
-		availAt = time.Now()
-	}
-	if v, ok := availCache[pkg]; ok {
+	v, ok := availCache[pkg]
+	availMu.Unlock()
+	if ok {
 		return v
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	// installed VEYA available → bulunursa dnf exit 0. (--available kurulu olanı göstermez,
-	// bu yüzden ikisini de deneriz.)
-	mevcut := exec.CommandContext(ctx, "dnf", "-q", "list", "--available", pkg).Run() == nil ||
-		exec.CommandContext(ctx, "dnf", "-q", "list", "--installed", pkg).Run() == nil
-	availCache[pkg] = mevcut
-	return mevcut
+	// Cache henüz dolmadı → istek bloklanmaz; varsayılan false. Sweep tamamlanınca düzelir.
+	return false
 }
 
 // Yollar(meta): yuklenmis olsa olsa nerede olur

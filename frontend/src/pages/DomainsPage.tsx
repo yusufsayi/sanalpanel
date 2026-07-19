@@ -38,6 +38,8 @@ export default function DomainsPage() {
 
   const [planlar, setPlanlar] = useState<Plan[]>([])
   const [phpSurumler, setPhpSurumler] = useState<PHPVer[]>([])
+  const [modalVeriYuk, setModalVeriYuk] = useState(false) // plan+php sürüm yüklemesi (listeyi BLOKLAMAZ)
+  const [modalVeriGeldi, setModalVeriGeldi] = useState(false)
   const [olusturAcik, setOlusturAcik] = useState(false)
   const [olusturuluyor, setOlusturuluyor] = useState(false)
   const [olusturmaSonuc, setOlusturmaSonuc] = useState<OlusturmaSonuc | null>(null)
@@ -45,25 +47,48 @@ export default function DomainsPage() {
   const [fPHPSurum, setFPHPSurum] = useState('8.3')
   const [fPlanID, setFPlanID] = useState<number | ''>('')
 
+  // Liste yalnızca /domains'e bağlıdır. /plans + /php/versions (yavaş olabilen dnf keşfi)
+  // listeyi BLOKLAMAZ — modal açılınca lazy çekilir. Böylece dnf yavaş/kilitliyken bile
+  // "Domainler" gelir gelmez render olur.
   function yukle() {
     setYuk(true)
-    Promise.all([
-      api.get<Domain[]>('/domains'),
-      api.get<Plan[]>('/plans').catch(() => ({ data: [] })),
-      api.get<PHPVer[]>('/php/versions').catch(() => ({ data: [] })),
-    ]).then(([dr, pr, phpr]) => {
-      setItems(dr.data)
-      setPlanlar(pr.data as Plan[]); setPhpSurumler(phpr.data as PHPVer[])
-    }).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    api.get<Domain[]>('/domains')
+      .then(r => setItems(r.data))
+      .catch(e => setHata(apiHata(e)))
+      .finally(() => setYuk(false))
   }
   useEffect(yukle, [])
 
+  // Modal için gereken plan + php sürümleri — listeyi bloklamayan ayrı yükleme.
+  // Modal ilk açılışında lazy çekilir; bir kez geldiyse tekrar çekmez.
+  function modalVeriYukle() {
+    if (modalVeriGeldi || modalVeriYuk) return
+    setModalVeriYuk(true)
+    Promise.all([
+      api.get<Plan[]>('/plans').catch(() => ({ data: [] })),
+      api.get<PHPVer[]>('/php/versions').catch(() => ({ data: [] })),
+    ]).then(([pr, phpr]) => {
+      const pl = pr.data as Plan[]
+      setPlanlar(pl)
+      setPhpSurumler(phpr.data as PHPVer[])
+      setModalVeriGeldi(true)
+      // Plan henüz seçilmediyse (modal veri gelmeden açıldıysa) varsayılanı ata.
+      setFPlanID(prev => {
+        if (prev !== '') return prev
+        const v = pl.find(p => p.ad === 'Başlangıç') || pl[0]
+        return v ? v.id : ''
+      })
+    }).finally(() => setModalVeriYuk(false))
+  }
+
   function olusturAc() {
     setHata(null); setBasari(null); setOlusturmaSonuc(null)
-    // varsayılan plan = "Başlangıç" (yoksa ilk plan, o da yoksa boş)
+    // varsayılan plan = "Başlangıç" (yoksa ilk plan, o da yoksa boş) — veri geldiyse hemen ata,
+    // gelmediyse modalVeriYukle tamamlanınca atanır.
     const varsayilan = planlar.find(p => p.ad === 'Başlangıç') || planlar[0]
     setFAlanAdi(''); setFPHPSurum('8.3'); setFPlanID(varsayilan ? varsayilan.id : '')
     setOlusturAcik(true)
+    modalVeriYukle() // lazy: plan/php sürümleri henüz gelmediyse şimdi çek (listeyi bloklamaz)
   }
 
   async function olusturGonder(e: React.FormEvent) {
@@ -290,7 +315,10 @@ export default function DomainsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">PHP Sürümü</label>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">
+                  PHP Sürümü
+                  {modalVeriYuk && phpSurumler.length === 0 && <span className="ml-2 text-[11px] text-slate-400 dark:text-slate-500">yükleniyor…</span>}
+                </label>
                 <select
                   value={fPHPSurum}
                   onChange={e => setFPHPSurum(e.target.value)}
@@ -307,7 +335,10 @@ export default function DomainsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Hizmet Planı</label>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">
+                  Hizmet Planı
+                  {modalVeriYuk && planlar.length === 0 && <span className="ml-2 text-[11px] text-slate-400 dark:text-slate-500">yükleniyor…</span>}
+                </label>
                 <select
                   value={fPlanID}
                   onChange={e => setFPlanID(e.target.value === '' ? '' : Number(e.target.value))}

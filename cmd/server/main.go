@@ -155,6 +155,9 @@ func main() {
 	phpExtH := &phpext.Handlers{DB: d}
 	paketlerH := &paketler.Handlers{DB: d}
 	phpSurumH := &phpsurum.Handlers{DB: d}
+	// 🔴 PERF: PHP kurulabilirlik keşfini (dnf) arka-plana al — /php/versions gibi
+	// TumSurumler() çağıran endpoint'ler istek path'inde dnf'e bloklamasın (Domains listesi).
+	phpsurum.StartAvailabilitySweeper()
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
