@@ -304,6 +304,48 @@ func mountKotaAktif() (accounting, enforcement bool) {
 	return accounting, enforcement
 }
 
+// ── Kota görünürlük sentinel'i ─────────────────────────────────────────────────
+// fs'te XFS user-quota enforcement AKTİF DEĞİLKEN (noquota → tek seferlik reboot bekliyor;
+// veya uqnoenforce → accounting açık/enforce kapalı) TÜM kota işlemleri sessizce no-op olur.
+// Operatör "kota aktif" sanmasın diye HealKotaOnStartup açılışta bu sentinel'i YAZAR;
+// enforcement aktifken SİLER. Status endpoint bunu okuyup UI'a reboot-gerekli bayrağı düşürür.
+const kotaSentinelDir = "/etc/girginospanel"
+const kotaRebootSentinel = kotaSentinelDir + "/reboot-required-quota"
+
+// kotaSentinelYaz: reboot-gerekli sentinel'ini idempotent yazar. Sabit yol; os.WriteFile =
+// O_WRONLY|O_CREATE|O_TRUNC, 0644, root. İçerik = açıklama + RFC3339 zaman damgası.
+func kotaSentinelYaz() {
+	if err := os.MkdirAll(kotaSentinelDir, 0755); err != nil {
+		log.Printf("kota sentinel: dizin oluşturulamadı (%s): %v", kotaSentinelDir, err)
+		return
+	}
+	body := "disk kotası aktif değil — rootflags=uquota + reboot gerekli\n" +
+		time.Now().Format(time.RFC3339) + "\n"
+	if err := os.WriteFile(kotaRebootSentinel, []byte(body), 0644); err != nil {
+		log.Printf("kota sentinel yazılamadı (%s): %v", kotaRebootSentinel, err)
+	}
+}
+
+// kotaSentinelSil: enforcement aktifken (reboot sonrası) bayat reboot uyarısını kaldırır.
+// Dosya yoksa no-op (idempotent).
+func kotaSentinelSil() {
+	if err := os.Remove(kotaRebootSentinel); err != nil && !os.IsNotExist(err) {
+		log.Printf("kota sentinel silinemedi (%s): %v", kotaRebootSentinel, err)
+	}
+}
+
+// KotaRebootGerekli: disk kotası enforcement AKTİF DEĞİL mi (tek seferlik reboot bekliyor).
+// Sentinel dosyası VARSA (HealKotaOnStartup açılışta yazmış) VEYA canlı XFS enforcement
+// KAPALIYSA true. os.Stat önce denenir → sentinel varken exec'siz. Status endpoint UI bayrağı
+// (kota_reboot_gerekli) buradan beslenir.
+func KotaRebootGerekli() bool {
+	if _, err := os.Stat(kotaRebootSentinel); err == nil {
+		return true
+	}
+	_, enf := mountKotaAktif()
+	return !enf
+}
+
 // kotaLimitArgs: xfs_quota'ya verilecek arg-slice (saf → birim-test edilebilir).
 // soft = hard*0.95. diskMB veya inode 0 ise o metrik "0" = SINIRSIZ bırakılır
 // (xfs_quota'da bhard/ihard=0 → limit yok). sk çağırandan önce reKotaSK'dan geçmiş olmalı.
@@ -329,8 +371,13 @@ func KotaUygula(ctx context.Context, sk string, diskMB, inode int) error {
 	if !reKotaSK.MatchString(sk) {
 		return fmt.Errorf("kota: geçersiz sistem kullanıcı biçimi: %q", sk)
 	}
-	if acc, enf := mountKotaAktif(); !acc && !enf {
-		log.Printf("kota: fs'te aktif değil (noquota) — tek seferlik reboot gerekli, %s atlandı", sk)
+	if acc, enf := mountKotaAktif(); !enf {
+		// enforcement kapalı → limit YAZMA (enforce edilmeyecek). acc açıksa uqnoenforce durumu.
+		if acc {
+			log.Printf("kota: XFS quota accounting açık ama enforcement KAPALI (uqnoenforce?) — limitler enforce EDİLMİYOR, %s atlandı", sk)
+		} else {
+			log.Printf("kota: fs'te aktif değil (noquota) — tek seferlik reboot gerekli, %s atlandı", sk)
+		}
 		return nil
 	}
 	home := "/home/" + sk
@@ -420,7 +467,11 @@ func KotaDurum(sk string) (kullanilanMB, limitMB, kullanilanInode, limitInode in
 	if !reKotaSK.MatchString(sk) {
 		return 0, 0, 0, 0
 	}
-	if acc, enf := mountKotaAktif(); !acc && !enf {
+	if acc, enf := mountKotaAktif(); !enf {
+		// enforcement kapalı → limitler enforce edilmiyor; kullanım/limit gösterme (0 dön).
+		if acc {
+			log.Printf("kota durum: XFS quota accounting açık ama enforcement KAPALI (uqnoenforce?) — limitler enforce EDİLMİYOR")
+		}
 		return 0, 0, 0, 0
 	}
 	bUsedKB, bHardKB := kotaReportSatir("-b", sk) // KB
@@ -828,14 +879,21 @@ func HealKotaOnStartup(ctx context.Context, db *sql.DB) {
 	if db == nil {
 		return
 	}
-	// fs kota aktif değilse: tek log + çık (tüm tenant'lar atlandı — reboot bekliyor).
-	if acc, enf := mountKotaAktif(); !acc && !enf {
+	// fs kota enforcement kapalıysa: reboot-gerekli sentinel'ini YAZ (UI görünürlüğü) + tek log + çık.
+	if acc, enf := mountKotaAktif(); !enf {
+		kotaSentinelYaz()
 		var toplam int
 		_ = db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM domains WHERE sistem_kullanici LIKE 'c\_%'`).Scan(&toplam)
-		log.Printf("kota heal: 0 tenant / %d atlandı (fs noquota — tek seferlik reboot gerekli)", toplam)
+		if acc {
+			log.Printf("kota heal: 0 tenant / %d atlandı (XFS accounting açık ama enforcement KAPALI — uqnoenforce? limitler enforce EDİLMİYOR; sentinel yazıldı)", toplam)
+		} else {
+			log.Printf("kota heal: 0 tenant / %d atlandı (fs noquota — tek seferlik reboot gerekli; sentinel yazıldı)", toplam)
+		}
 		return
 	}
+	// enforcement aktif → reboot sonrası bayat reboot uyarısını kaldır (idempotent).
+	kotaSentinelSil()
 	rows, err := db.QueryContext(ctx,
 		`SELECT id FROM domains WHERE sistem_kullanici LIKE 'c\_%' ORDER BY id`)
 	if err != nil {

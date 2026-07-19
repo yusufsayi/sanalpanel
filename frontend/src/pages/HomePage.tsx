@@ -17,6 +17,7 @@ type Servis = { ad: string; etiket: string; aktif: boolean }
 type Sistem = {
   sistem: SistemInfo; cpu: CPU; bellek: Bellek; swap: Swap
   disk: Disk; diskler: Disk[]; ag: Ag; servisler: Servis[]; uptime_sn: number
+  kota_reboot_gerekli?: boolean
 }
 type Domain = { id: number; alan_adi: string; ssl: boolean; durum: string }
 
@@ -52,6 +53,21 @@ export default function HomePage() {
           Canlı
         </div>
       </div>
+
+      {/* Disk kotası aktif değil — tek seferlik reboot gerekli (sadece bayrak true iken) */}
+      {s?.kota_reboot_gerekli && (
+        <div className="mb-3 flex items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/15 px-4 py-3">
+          <svg className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.363 3.591 2.257 17.657a1.5 1.5 0 0 0 1.302 2.25h16.882a1.5 1.5 0 0 0 1.302-2.25L13.638 3.591a1.5 1.5 0 0 0-2.598 0Z" />
+          </svg>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">Disk kotası aktif değil</div>
+            <div className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+              Disk kotası aktif değil — etkinleştirmek için tek seferlik sunucu yeniden başlatması gerekli.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI — kompakt ring gauge'lar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">

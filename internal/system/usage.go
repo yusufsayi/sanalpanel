@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kaynaklimit"
 )
 
 const PanelSurum = "GirginOSPanel 0.2.0"
@@ -85,6 +86,10 @@ type Usage struct {
 	Ag        AgUsage       `json:"ag"`
 	Servisler []ServiceStat `json:"servisler"`
 	UptimeSn  int64         `json:"uptime_sn"`
+
+	// KotaRebootGerekli: disk kotası enforcement AKTİF DEĞİL (fs noquota / uqnoenforce) →
+	// tek seferlik reboot bekliyor. UI'da sarı uyarı banner'ı bunu okur.
+	KotaRebootGerekli bool `json:"kota_reboot_gerekli"`
 }
 
 type cpuStat struct{ total, idle uint64 }
@@ -561,19 +566,22 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	var servisler []ServiceStat
 	var swap SwapUsage
 	var info SystemInfo
+	var kotaReboot bool
 
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(6)
 	go func() { defer wg.Done(); diskler = ReadDiskler() }()
 	go func() { defer wg.Done(); ag = ReadAg() }()
 	go func() { defer wg.Done(); servisler = ReadServisler() }()
 	go func() { defer wg.Done(); swap = ReadSwap() }()
 	go func() { defer wg.Done(); info = ReadInfo() }()
+	go func() { defer wg.Done(); kotaReboot = kaynaklimit.KotaRebootGerekli() }()
 	wg.Wait()
 
 	httpx.WriteJSON(w, http.StatusOK, Usage{
 		Sistem: info, CPU: cpu, Bellek: mem, Swap: swap,
 		Disk: disk, Diskler: diskler, Ag: ag,
 		Servisler: servisler, UptimeSn: ReadUptime(),
+		KotaRebootGerekli: kotaReboot,
 	})
 }
