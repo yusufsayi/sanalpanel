@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )

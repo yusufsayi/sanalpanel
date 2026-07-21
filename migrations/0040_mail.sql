@@ -1,7 +1,7 @@
 -- 0040 - native mail hosting (Postfix/Dovecot virtual mailbox tabloları).
 -- Merkezi panel DB'de tutulur (per-tenant DB değil) — hem standart Postfix/Dovecot
 -- "virtual mailbox in central DB" deseni budur, hem de panel DB zaten günlük
--- otomatik yedekleniyor (girginospanel-db-backup) — mail metadata'sı bedavaya biner.
+-- otomatik yedekleniyor (sanalpanel-db-backup) — mail metadata'sı bedavaya biner.
 -- Postfix/Dovecot bu tabloları CANLI MySQL sorgusuyla okur (mailro salt-okunur kullanıcı);
 -- statik config yeniden üretimi gerekmez, bu yüzden değişiklikler anında etkilidir.
 

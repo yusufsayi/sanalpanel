@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/dns"
-	"girginospanel/internal/hesaplar"
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/kaynaklimit"
-	"girginospanel/internal/kota"
-	"girginospanel/internal/mail"
-	"girginospanel/internal/provisioner"
-	"girginospanel/internal/redis"
+	"sanalpanel/internal/dns"
+	"sanalpanel/internal/hesaplar"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/kaynaklimit"
+	"sanalpanel/internal/kota"
+	"sanalpanel/internal/mail"
+	"sanalpanel/internal/provisioner"
+	"sanalpanel/internal/redis"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -270,7 +270,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		if err := provisioner.Deprovision(alanAdi, sk); err != nil {
 			log.Printf("deprovision warn (%s): %v", alanAdi, err)
 		}
-		// Kaynak-limit slice'ını (girginos-<sk>.slice) kaldır (Deprovision FPM'i söktü).
+		// Kaynak-limit slice'ını (sanal-<sk>.slice) kaldır (Deprovision FPM'i söktü).
 		_ = kaynaklimit.SystemdSliceSil(sk)
 		// Redis tenant cache: Valkey ACL user + WP drop-in + cp_domain_redis satırı.
 		// cp_domain_redis'te CASCADE FK olmadığı için domain silinince satır orphan kalıyordu.
@@ -279,7 +279,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		// DB satırları aşağıdaki DELETE FROM domains ile otomatik silinir. KapatDomain yine de
 		// çağrılır (redis.KapatDomain ile aynı simetri) — ileride cascade-dışı bir yan etki eklenirse.
 		mail.KapatDomain(h.DB, id, sk)
-		// NOT: /var/backups/girginospanel/<sk>/ dizini KASITLI olarak korunur.
+		// NOT: /var/backups/sanalpanel/<sk>/ dizini KASITLI olarak korunur.
 		// Müşteri domaini yanlışlıkla silmiş olabilir → yedekler kurtarma için saklanır.
 		// (Manuel temizlik için backups.RemoveDomainBackups mevcut.)
 	}

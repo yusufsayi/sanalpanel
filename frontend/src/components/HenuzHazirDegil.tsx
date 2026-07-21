@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 export default function HenuzHazirDegil({
   baslik, faz, aciklama,
 }: { baslik: string; faz: string; aciklama: string }) {

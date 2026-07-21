@@ -15,11 +15,11 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/auth"
-	"girginospanel/internal/hesaplar"
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/kota"
-	"girginospanel/internal/middleware"
+	"sanalpanel/internal/auth"
+	"sanalpanel/internal/hesaplar"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/kota"
+	"sanalpanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )

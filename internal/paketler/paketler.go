@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // Kritik paketler — kaldirilirsa sistem coker

@@ -279,7 +279,7 @@ export default function PaketDetayPage() {
             </Alan>
           </div>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve <code className="font-mono">girginospanel-waf-setup</code> ile etkinleşir.
+            ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve <code className="font-mono">sanalpanel-waf-setup</code> ile etkinleşir.
           </p>
         </Kart>
 

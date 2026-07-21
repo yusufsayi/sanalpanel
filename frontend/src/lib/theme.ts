@@ -1,11 +1,11 @@
 // Panel dark/light/system tema yönetimi.
-// - localStorage anahtarı: gosp.theme (light|dark|system)
+// - localStorage anahtarı: sanal.theme (light|dark|system)
 // - system: prefers-color-scheme: dark medya sorgusuna göre
 // - Sınıf: <html class="dark"> Tailwind darkMode: 'class' ile eşleşir.
 
 export type Theme = 'light' | 'dark' | 'system'
 
-const KEY = 'gosp.theme'
+const KEY = 'sanal.theme'
 
 export function getTheme(): Theme {
   if (typeof window === 'undefined') return 'light'
@@ -31,7 +31,7 @@ export function applyTheme(t: Theme) {
 export function setTheme(t: Theme) {
   localStorage.setItem(KEY, t)
   applyTheme(t)
-  window.dispatchEvent(new CustomEvent('gosp:theme-change', { detail: t }))
+  window.dispatchEvent(new CustomEvent('sanal:theme-change', { detail: t }))
 }
 
 // Boot-time: ilk render öncesi çağır (main.tsx içinden).

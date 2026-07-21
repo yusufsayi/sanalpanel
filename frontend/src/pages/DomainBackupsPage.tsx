@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -163,7 +163,7 @@ export default function DomainBackupsPage() {
   }
 
   function indir(y: Yedek) {
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = localStorage.getItem('sanal.token') || ''
     fetch(`/api/v1/domains/${id}/backups/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
       .then(r => r.blob())
       .then(blob => {

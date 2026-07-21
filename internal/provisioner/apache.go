@@ -14,7 +14,7 @@ import (
 
 const ApacheUpstream = "127.0.0.1:10080"
 
-var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — GirginOSPanel Apache backend (nginx ön proxy)
+var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — SanalPanel Apache backend (nginx ön proxy)
 # Guvenlik notu: yanit guvenlik header'lari EDGE'de (nginx) uygulanir (cift-header
 # olmamasi icin). Apache katmani YURUTME/ERISIM politikasini uygular: CGI kapali,
 # betik dosyalari + yedek/dump dosyalari reddedilir, symlink yalniz sahip-eslesirse.

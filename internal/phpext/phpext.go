@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/phpsurum"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/phpsurum"
 
 	"github.com/go-chi/chi/v5"
 )

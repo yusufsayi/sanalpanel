@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // StartYukSampler: her `every` sürede /proc/loadavg + /proc/meminfo örnekler, sistem_yuk'e yazar.

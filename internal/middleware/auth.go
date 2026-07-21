@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/auth"
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/auth"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )

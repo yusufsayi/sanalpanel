@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -107,7 +107,7 @@ func dsFromDNSKEY(ctx context.Context, zone string) []string {
 	if err != nil || len(strings.TrimSpace(string(dk))) == 0 {
 		return nil
 	}
-	f, err := os.CreateTemp("", "gosp-dnskey-*.txt")
+	f, err := os.CreateTemp("", "sanal-dnskey-*.txt")
 	if err != nil {
 		return nil
 	}

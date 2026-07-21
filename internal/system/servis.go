@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // Servis yönetimi: Genel Ayarlar'dan izin verilen servisleri restart/reload etme.

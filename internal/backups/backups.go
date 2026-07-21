@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
 
-const BackupRoot = "/var/backups/girginospanel"
+const BackupRoot = "/var/backups/sanalpanel"
 
 // RemoveDomainBackups: bir domainin per-domain backup dizinini kaldırır.
 // ÖNEMLİ: Domain silme akışından ÇAĞRILMAZ — müşteri yanlışlıkla silmiş olabilir,

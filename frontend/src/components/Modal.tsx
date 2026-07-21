@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect } from 'react'
 
 export default function Modal({

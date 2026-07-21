@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -147,7 +147,7 @@ func probe(targetURL string) DomainHealth {
 
 	start := time.Now()
 	req, _ := http.NewRequest("GET", targetURL, nil)
-	req.Header.Set("User-Agent", "GirginOSPanel-Monitor/1.0")
+	req.Header.Set("User-Agent", "SanalPanel-Monitor/1.0")
 	req.Header.Set("Accept", "text/html,*/*")
 	resp, err := client.Do(req)
 	res.YanitSuresiMs = float64(time.Since(start).Microseconds()) / 1000.0

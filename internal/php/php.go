@@ -19,9 +19,9 @@ import (
 	"strings"
 	"text/template"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/phpsurum"
-	"girginospanel/internal/provisioner"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/phpsurum"
+	"sanalpanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )

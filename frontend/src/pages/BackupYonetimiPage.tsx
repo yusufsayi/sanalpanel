@@ -108,7 +108,7 @@ export default function BackupYonetimiPage() {
         </div>
       </div>
       <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
-        ℹ️ Yedekler <span className="font-mono">/var/backups/girginospanel/&lt;domain&gt;/</span> altında tutulur. Domain silinse bile yedekleri korunur (yanlış silme kurtarma). Tekil yedek indirme/geri yükleme/hedef ayarı için "Yönet"e girin.
+        ℹ️ Yedekler <span className="font-mono">/var/backups/sanalpanel/&lt;domain&gt;/</span> altında tutulur. Domain silinse bile yedekleri korunur (yanlış silme kurtarma). Tekil yedek indirme/geri yükleme/hedef ayarı için "Yönet"e girin.
       </p>
     </div>
   )

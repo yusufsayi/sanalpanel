@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // GET /domains/{id}/backup-destination

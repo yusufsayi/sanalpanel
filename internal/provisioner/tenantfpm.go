@@ -1,7 +1,7 @@
 // Per-tenant PHP-FPM izolasyonu (Seçenek A — CageFS/LVE eşdeğeri).
 //
 // Her tenant için AYRI bir php-fpm master servisi:
-//   - Slice=girginos-<sk>.slice  → gerçek cgroup limit (CPU/RAM/Tasks/IO) uygulanır.
+//   - Slice=sanal-<sk>.slice  → gerçek cgroup limit (CPU/RAM/Tasks/IO) uygulanır.
 //   - ProtectHome=tmpfs + BindPaths=/home/<sk> → tenant YALNIZ kendi home'unu görür (CageFS).
 //   - PrivateTmp + ProtectSystem=strict + ProtectProc=invisible + NoNewPrivileges +
 //     RestrictNamespaces → sistem/komşu izolasyonu.
@@ -62,7 +62,7 @@ const fpmSocketFcontextSpec = "/run/php-fpm-[^/]+(/.*)?"
 // semanage fcontext -l yavaş olduğu için tekrar tekrar çağrılmaz. SELinux Disabled /
 // semanage yok ise sessiz atlar. Kuralın YALNIZ VARLIĞINI garanti eder — asıl etiketleme
 // (restorecon) EnableTenantFPM içinde socket oluştuktan sonra AYRI yapılır.
-// (Desen: girginospanel-repair ensure_context.)
+// (Desen: sanalpanel-repair ensure_context.)
 func ensureFPMSELinuxFcontext() {
 	fcontextMu.Lock()
 	defer fcontextMu.Unlock()
@@ -374,14 +374,14 @@ include=%s/pool.conf
 // renderTenantUnit: per-tenant php-fpm systemd unit'i (slice + sandbox).
 func renderTenantUnit(sk, fpmBin string) string {
 	return fmt.Sprintf(`[Unit]
-Description=GirginOSPanel per-tenant PHP-FPM — %s
+Description=SanalPanel per-tenant PHP-FPM — %s
 After=network.target
 Before=nginx.service
 
 [Service]
 Type=notify
 NotifyAccess=all
-Slice=girginos-%s.slice
+Slice=sanal-%s.slice
 ExecStart=%s --nodaemonize --fpm-config %s/php-fpm.conf
 ExecReload=/bin/kill -USR2 $MAINPID
 RuntimeDirectory=php-fpm-%s
@@ -738,7 +738,7 @@ func renderDebugPrependPHP(sk, orig string) string {
 	logPath := tenantDebugLogPath(sk)
 	var b strings.Builder
 	b.WriteString("<?php\n")
-	b.WriteString("// GirginOSPanel PHP Debug Modu — otomatik uretildi, ELLE DUZENLEMEYIN.\n")
+	b.WriteString("// SanalPanel PHP Debug Modu — otomatik uretildi, ELLE DUZENLEMEYIN.\n")
 	b.WriteString("register_shutdown_function(function(){\n")
 	b.WriteString("  $e=error_get_last();\n")
 	b.WriteString("  if($e && in_array($e['type'],[E_ERROR,E_PARSE,E_CORE_ERROR,E_COMPILE_ERROR,E_RECOVERABLE_ERROR],true)){\n")

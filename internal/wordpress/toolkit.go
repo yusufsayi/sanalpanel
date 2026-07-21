@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // eklenti/tema slug'ları: arg-injection'ı önlemek için katı doğrulama (başında '-' olamaz).

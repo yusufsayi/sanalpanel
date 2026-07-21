@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS cp_eklentiler (
   etiket      VARCHAR(128) NOT NULL,                  -- UI adı: 'AI Asistan'
   surum       VARCHAR(32)  NOT NULL DEFAULT '',
   aktif       TINYINT(1)   NOT NULL DEFAULT 0,        -- paralı gate: 0 => 402
-  soket       VARCHAR(255) NOT NULL DEFAULT '',       -- /run/girginospanel/eklenti-ai.sock
+  soket       VARCHAR(255) NOT NULL DEFAULT '',       -- /run/sanalpanel/eklenti-ai.sock
   ui          TINYINT(1)   NOT NULL DEFAULT 0,        -- frontend bundle sunuyor mu
   saglik      VARCHAR(16)  NOT NULL DEFAULT 'bilinmiyor', -- saglikli|saglksiz|bilinmiyor
   son_kontrol DATETIME     NULL,

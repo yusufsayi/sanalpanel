@@ -33,10 +33,10 @@ func ValidateNginxDirectives(direktifler string) error {
 	// katılmaz. Bu yüzden gerçek ".conf" adına taşıyoruz.
 	finalPath := strings.TrimSuffix(tmpPath, ".tmp")
 
-	block := fmt.Sprintf(`# GirginOSPanel geçici plan direktif doğrulaması — otomatik silinir
+	block := fmt.Sprintf(`# SanalPanel geçici plan direktif doğrulaması — otomatik silinir
 server {
     listen 127.0.0.1:65071;
-    server_name _gosp_plan_validate;
+    server_name _sanal_plan_validate;
     root /var/www/_default80;
     # ---- doğrulanan direktifler ----
 %s

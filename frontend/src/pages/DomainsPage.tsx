@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'

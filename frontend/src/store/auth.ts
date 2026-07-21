@@ -18,13 +18,13 @@ type AuthState = {
   hidrate: () => void
 }
 
-const KEY_TOKEN = 'gosp.token'
-const KEY_USER  = 'gosp.user'
-const KEY_EXP   = 'gosp.exp'
+const KEY_TOKEN = 'sanal.token'
+const KEY_USER  = 'sanal.user'
+const KEY_EXP   = 'sanal.exp'
 
-const KEY_MUSTERI      = 'girginospanel.musteri'
-const KEY_MUSTERI_DOM  = 'girginospanel.musteri.domain_id'
-const KEY_MUSTERI_ALAN = 'girginospanel.musteri.alan_adi'
+const KEY_MUSTERI      = 'sanalpanel.musteri'
+const KEY_MUSTERI_DOM  = 'sanalpanel.musteri.domain_id'
+const KEY_MUSTERI_ALAN = 'sanalpanel.musteri.alan_adi'
 
 function musteriBayrakSil() {
   localStorage.removeItem(KEY_MUSTERI)

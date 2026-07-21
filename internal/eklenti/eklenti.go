@@ -24,13 +24,13 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/middleware"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
 
-const bundleKok = "/opt/girginospanel/eklentiler"
+const bundleKok = "/opt/sanalpanel/eklentiler"
 
 type Handlers struct{ DB *sql.DB }
 
@@ -157,13 +157,13 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 			// Kimliği güvenilir header ile geçir — eklenti JWT doğrulamaz,
 			// yalnız core'a (sokete) güvenir.
 			// 🔴 Dışarıdan gelen taklit header'ları ÖNCE TEMİZLE (spoof koruması).
-			req.Header.Del("X-Gosp-Kullanici")
-			req.Header.Del("X-Gosp-Uid")
-			req.Header.Del("X-Gosp-Rol")
+			req.Header.Del("X-Sanal-Kullanici")
+			req.Header.Del("X-Sanal-Uid")
+			req.Header.Del("X-Sanal-Rol")
 			if c := middleware.ClaimsFrom(req); c != nil {
-				req.Header.Set("X-Gosp-Uid", strconv.FormatInt(c.UserID, 10))
-				req.Header.Set("X-Gosp-Kullanici", c.Username)
-				req.Header.Set("X-Gosp-Rol", c.Role)
+				req.Header.Set("X-Sanal-Uid", strconv.FormatInt(c.UserID, 10))
+				req.Header.Set("X-Sanal-Kullanici", c.Username)
+				req.Header.Set("X-Sanal-Rol", c.Role)
 			}
 		},
 		FlushInterval: -1, // SSE: her yazımda anında flush

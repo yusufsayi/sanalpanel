@@ -8,7 +8,7 @@ import (
 )
 
 // HealMailOnStartup: her boot'ta çalışır. Postfix/Dovecot config dosyalarının varlığını
-// doğrular (eksikse yalnız uyarı loglar — girginospanel-mail-setup henüz çalıştırılmamış
+// doğrular (eksikse yalnız uyarı loglar — sanalpanel-mail-setup henüz çalıştırılmamış
 // olabilir, panel mail olmadan da ayakta kalmaya devam etmeli, diğer Heal* fonksiyonlarıyla
 // aynı "asla fatal değil" üslup) ve aktif mail_domains satırlarının maildir_root'u diskte
 // yoksa (ör. disk temizliği / yeni sunucuya taşıma) yeniden oluşturur.
@@ -19,7 +19,7 @@ func HealMailOnStartup(ctx context.Context, db *sql.DB) {
 	}
 	for _, p := range must {
 		if _, err := os.Stat(p); err != nil {
-			log.Printf("mail heal: %s eksik — girginospanel-mail-setup çalıştırılmamış olabilir", p)
+			log.Printf("mail heal: %s eksik — sanalpanel-mail-setup çalıştırılmamış olabilir", p)
 		}
 	}
 

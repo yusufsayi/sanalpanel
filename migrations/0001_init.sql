@@ -1,4 +1,4 @@
--- GirginOSPanel — F1 başlangıç şeması
+-- SanalPanel — F1 başlangıç şeması
 -- charset utf8mb4 / collation utf8mb4_unicode_ci (Türkçe karakter güvenli)
 
 CREATE DATABASE IF NOT EXISTS panel

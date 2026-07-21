@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -63,7 +63,7 @@ export default function DomainLogsPage() {
     setSatirlar([]) // canlı başlangıçta tail kendi 200 satırı zaten gönderiyor
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = localStorage.getItem('sanal.token') || ''
 
     ;(async () => {
       try {

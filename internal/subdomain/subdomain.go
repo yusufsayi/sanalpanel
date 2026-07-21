@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/dns"
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/provisioner"
+	"sanalpanel/internal/dns"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -249,7 +249,7 @@ func vhost(tamAd, docroot, socket string) string {
 
     location ~ /\.(?!well-known) { deny all; }
 
-    # GirginOSPanel subdomain — ` + tamAd + `
+    # SanalPanel subdomain — ` + tamAd + `
 }
 `
 }

@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // claims: RequireAuth middleware zaten doğruladı; header'dan tekrar parse ederek
@@ -101,7 +101,7 @@ func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret := TOTPGenerateSecret()
-	uri := TOTPURI(secret, "root", "GirginOSPanel")
+	uri := TOTPURI(secret, "root", "SanalPanel")
 	resp := map[string]any{
 		"secret":      secret,
 		"otpauth":     uri, // geriye dönük uyum (elle giriş fallback)

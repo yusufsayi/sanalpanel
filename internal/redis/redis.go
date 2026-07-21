@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -172,7 +172,7 @@ func (h *Handlers) domainSK(r *http.Request) (id int64, sk string, ok bool) {
 }
 
 func wpSnippet(sk, pass string) string {
-	return "// GirginOSPanel Redis object cache\n" +
+	return "// SanalPanel Redis object cache\n" +
 		"define( 'WP_REDIS_HOST', '" + redisHost + "' );\n" +
 		"define( 'WP_REDIS_PORT', " + strconv.Itoa(redisPort) + " );\n" +
 		"define( 'WP_REDIS_PASSWORD', array( '" + sk + "', '" + pass + "' ) );\n" +

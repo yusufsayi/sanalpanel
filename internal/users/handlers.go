@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"net/http"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/middleware"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/middleware"
 )
 
 type Handlers struct {

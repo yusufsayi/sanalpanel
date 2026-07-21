@@ -3,7 +3,7 @@
 -- WAF, plan ve domain seviyesinde ac/kapa + ozellestirilebilir. Modul yuklemesi
 -- global fakat ZARARSIZDIR: bir vhost "modsecurity on" demedikce davranis degismez
 -- (per-domain opt-in). Bu migration yalnizca ayar kolonlarini ekler; modul + CRS
--- kurulumu ops script'i (girginospanel-waf-setup) ile yapilir.
+-- kurulumu ops script'i (sanalpanel-waf-setup) ile yapilir.
 --
 -- SEMANTIK:
 --   service_plans (plan varsayilani, NOT NULL):

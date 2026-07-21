@@ -1,0 +1,37 @@
+#!/bin/bash
+# SanalPanel — panel DB yedeği (günlük timer + update öncesi çağrılır).
+# Kimlik: root unix-socket (parolasız). Çıktı: üretilen dump yolunu stdout'a basar.
+set -euo pipefail
+
+DIR=/var/backups/sanalpanel/db      # SADECE burası; kardeş dizinler domain yedeği → DOKUNMA
+TUT_GUN=14
+mkdir -p "$DIR"; chmod 700 "$DIR"
+
+ts=$(date +%F-%H%M%S)
+tmp="$DIR/.panel-$ts.sql.gz.tmp"
+son="$DIR/panel-$ts.sql.gz"
+
+# Başarısız dump yarım .tmp BIRAKMASIN: mysqldump/gzip patlarsa `set -e` aşağıdaki
+# rm'lere hiç ulaşmadan çıkar; retention deseni (panel-*.sql.gz) .tmp'leri YAKALAMAZ,
+# dolayısıyla sonsuza dek birikirlerdi (disk dolu senaryosunda üstüne tuz biber).
+# mv başarılı olursa $tmp zaten yok → rm -f no-op.
+trap 'rm -f "$tmp"' EXIT
+
+# --single-transaction: InnoDB'de kilitsiz tutarlı anlık görüntü
+mysqldump --single-transaction --routines --triggers --events \
+  --databases panel | gzip -c > "$tmp"
+
+# fail-closed: gzip sağlam mı + boş değil mi. Bozuksa dump BIRAKMA.
+gzip -t "$tmp"
+[ "$(stat -c%s "$tmp")" -gt 1000 ] || { rm -f "$tmp"; echo "HATA: dump şüpheli derecede küçük" >&2; exit 1; }
+
+mv -f "$tmp" "$son"       # atomik: yarım dump asla geçerli isim almaz
+chmod 600 "$son"
+
+# retention — YALNIZCA bu dizin, YALNIZCA kendi ürettiğimiz desen
+find "$DIR" -maxdepth 1 -type f -name 'panel-*.sql.gz' -mtime +$TUT_GUN -delete
+# trap'ten önceki sürümlerden kalmış yarım .tmp'leri de süpür (1 günden eski =
+# kesin ölü; çalışan bir dump'ın tmp'si asla bu kadar eski olamaz)
+find "$DIR" -maxdepth 1 -type f -name '.panel-*.sql.gz.tmp' -mtime +1 -delete
+
+echo "$son"

@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -379,7 +379,7 @@ export default function DomainFilesPage() {
   }
 
   function indir(e: Entry) {
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = localStorage.getItem('sanal.token') || ''
     const url = `/api/v1/domains/${id}/files/indir?yol=${encodeURIComponent(e.yol)}`
     // Header'lı GET tarayıcıdan; en basit: ayrı fetch + blob
     fetch(url, { headers: { Authorization: `Bearer ${tok}` } })

@@ -8,8 +8,8 @@ package provisioner
 // bağlanır → DB-user'ların @localhost (socket) kaydına eşleşir.
 //
 // Bu heal (provisioner.Init'ten her boot) idempotent garanti eder:
-//   - /opt/girginospanel/pma-signon/pma-signon.php  → host='localhost' (yoksa/eskiyse yaz)
-//   - /etc/girginospanel/pma-internal.token         → yoksa üret (root:apache 0640)
+//   - /opt/sanalpanel/pma-signon/pma-signon.php  → host='localhost' (yoksa/eskiyse yaz)
+//   - /etc/sanalpanel/pma-internal.token         → yoksa üret (root:apache 0640)
 //   - /etc/php-fpm.d/phpmyadmin.conf                → mysqli/pdo_mysql.default_socket eklenir
 //   - /opt/phpmyadmin/config.inc.php                → host 127.0.0.1 → localhost
 //
@@ -30,9 +30,9 @@ import (
 )
 
 const (
-	pmaSignonDir  = "/opt/girginospanel/pma-signon"
-	pmaSignonPath = "/opt/girginospanel/pma-signon/pma-signon.php"
-	pmaTokenPath  = "/etc/girginospanel/pma-internal.token"
+	pmaSignonDir  = "/opt/sanalpanel/pma-signon"
+	pmaSignonPath = "/opt/sanalpanel/pma-signon/pma-signon.php"
+	pmaTokenPath  = "/etc/sanalpanel/pma-internal.token"
 	pmaPoolPath   = "/etc/php-fpm.d/phpmyadmin.conf"
 	pmaConfigPath = "/opt/phpmyadmin/config.inc.php"
 )
@@ -62,7 +62,7 @@ if (!preg_match('/^[a-f0-9]{16,128}$/', $token)) {
     die('Token formati gecersiz.');
 }
 
-$internalToken = trim((string)@file_get_contents('/etc/girginospanel/pma-internal.token'));
+$internalToken = trim((string)@file_get_contents('/etc/sanalpanel/pma-internal.token'));
 if ($internalToken === '') {
     http_response_code(500);
     die('PMA internal token sunucuda yok.');
@@ -180,7 +180,7 @@ func ensurePMAToken() {
 	} else {
 		_ = os.Chmod(pmaTokenPath, 0644) // apache grubu yok → pool okuyabilsin
 	}
-	log.Printf("pma heal: /etc/girginospanel/pma-internal.token üretildi")
+	log.Printf("pma heal: /etc/sanalpanel/pma-internal.token üretildi")
 }
 
 var pmaSocketLineRe = regexp.MustCompile(`(?m)^\s*php_value\[(?:mysqli|pdo_mysql)\.default_socket\]`)

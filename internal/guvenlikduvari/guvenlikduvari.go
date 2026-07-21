@@ -1,4 +1,4 @@
-// Package guvenlikduvari: panel-yönetimli nftables güvenlik duvarı (inet girginos_fw).
+// Package guvenlikduvari: panel-yönetimli nftables güvenlik duvarı (inet sanal_fw).
 //
 // Güvenlik tasarımı:
 //   - Tablo policy ACCEPT: kural yoksa hiçbir şey engellenmez (varsayılan bozmaz).
@@ -6,7 +6,7 @@
 //     kurallar yalnızca YENİ bağlantıları etkiler → yanlış kural = anında kilitlenme DEĞİL.
 //   - Kritik portlar (SSH/web/panel/DNS) KAPATILAMAZ (self-lockout + site-down koruması).
 //   - Uygulamadan önce "nft -c" (check) → hata varsa uygulanmaz (nginx -t deseni).
-//   - Kalıcılık: /etc/nftables/girginos_fw.nft + panel başlangıcında Reapply.
+//   - Kalıcılık: /etc/nftables/sanal_fw.nft + panel başlangıcında Reapply.
 package guvenlikduvari
 
 import (
@@ -22,14 +22,14 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
 
 const (
-	tabloAdi   = "girginos_fw"
-	kuralDosya = "/etc/nftables/girginos_fw.nft"
+	tabloAdi   = "sanal_fw"
+	kuralDosya = "/etc/nftables/sanal_fw.nft"
 )
 
 // KAPATILAMAZ portlar: bunları "kapat" ile engellemek sunucuyu/paneli/siteleri düşürür.

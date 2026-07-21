@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useNavigate } from 'react-router-dom'
 import type { Domain } from './DomainList'
 import ToolCard from './ToolCard'

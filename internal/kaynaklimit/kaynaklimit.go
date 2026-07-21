@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/provisioner"
+	"sanalpanel/internal/provisioner"
 )
 
 // Limitler: plan tablosundan okunan aktif değerler.
@@ -67,21 +67,21 @@ func PlanLimitleriGetir(ctx context.Context, db *sql.DB, domainID int64) (Limitl
 const sliceDir = "/etc/systemd/system"
 
 func sliceName(sk string) string {
-	// systemd slice — girginos-c_reg_kalici_test_local.slice
-	return "girginos-" + sk + ".slice"
+	// systemd slice — sanal-c_reg_kalici_test_local.slice
+	return "sanal-" + sk + ".slice"
 }
 
 func slicePath(sk string) string {
 	return filepath.Join(sliceDir, sliceName(sk))
 }
 
-// SystemdSliceYaz: /etc/systemd/system/girginos-<sk>.slice dosyasını yazar.
+// SystemdSliceYaz: /etc/systemd/system/sanal-<sk>.slice dosyasını yazar.
 // CPUQuota, MemoryMax, TasksMax, IOWeight + (varsa) MUTLAK disk G/Ç throttle'ları
 // (IO{Read,Write}BandwidthMax / IO{Read,Write}IOPSMax) kural setini kullanır (cgroup v2).
 func SystemdSliceYaz(sk string, l Limitler) error {
-	content := fmt.Sprintf(`# GirginOSPanel per-domain resource slice — %s
+	content := fmt.Sprintf(`# SanalPanel per-domain resource slice — %s
 [Unit]
-Description=GirginOS panel slice for %s
+Description=SanalPanel tenant slice for %s
 Before=slices.target
 
 [Slice]
@@ -239,7 +239,7 @@ func SystemdSliceSil(sk string) error {
 
 // NOT (Batch5A): eski PHPFPMSlicePool kaldırıldı. FPM limit uygulaması artık TEK
 // yazıcıda — provisioner.EnableTenantFPM (Seçenek A per-tenant php-fpm servisi +
-// girginos-<sk>.slice cgroup üyeliği). kaynaklimit ARTIK pool dosyasına dokunmaz
+// sanal-<sk>.slice cgroup üyeliği). kaynaklimit ARTIK pool dosyasına dokunmaz
 // (yoksa php.go bir sonraki ayar kaydında yazdıklarımızı silerdi). Slice cgroup'u
 // gerçek enforcement'ı sağlar; pool yalnız pm.* + php_admin_value taşır.
 
@@ -309,7 +309,7 @@ func mountKotaAktif() (accounting, enforcement bool) {
 // veya uqnoenforce → accounting açık/enforce kapalı) TÜM kota işlemleri sessizce no-op olur.
 // Operatör "kota aktif" sanmasın diye HealKotaOnStartup açılışta bu sentinel'i YAZAR;
 // enforcement aktifken SİLER. Status endpoint bunu okuyup UI'a reboot-gerekli bayrağı düşürür.
-const kotaSentinelDir = "/etc/girginospanel"
+const kotaSentinelDir = "/etc/sanalpanel"
 const kotaRebootSentinel = kotaSentinelDir + "/reboot-required-quota"
 
 // kotaSentinelYaz: reboot-gerekli sentinel'ini idempotent yazar. Sabit yol; os.WriteFile =
@@ -787,7 +787,7 @@ func servisAktif(unit string) bool {
 //     provisioner.RollbackToSharedFPM + slice sil → site paylaşılan düzende 200 kalır.
 //
 // İdempotent (migrate olanı atlar), SIRALI (thundering yok), ARKA PLANDA çağrılır
-// (panel boot'unu bloklamaz). girginospanel-update her panel restart'ında tetikler →
+// (panel boot'unu bloklamaz). sanalpanel-update her panel restart'ında tetikler →
 // update için plan-driven cutover mekanizması. Plan atanmamış domain'e DOKUNMAZ.
 func HealTenantFPM(ctx context.Context, db *sql.DB) {
 	if db == nil {

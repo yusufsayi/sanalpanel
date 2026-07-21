@@ -113,11 +113,11 @@ func wafDomainConfYaz(sk, engine string, paranoya int) error {
 	custom := filepath.Join(wafDomainsDir, sk+".custom.conf")
 	if _, err := os.Stat(custom); err != nil {
 		_ = os.WriteFile(custom,
-			[]byte("# GirginOSPanel WAF — "+sk+" ozel kurallar / haric-tutmalar (opsiyonel, MVP: bos).\n"+
+			[]byte("# SanalPanel WAF — "+sk+" ozel kurallar / haric-tutmalar (opsiyonel, MVP: bos).\n"+
 				"# Ornek CRS istisnasi: SecRuleRemoveById 942100\n"), 0644)
 	}
 	var b strings.Builder
-	b.WriteString("# GirginOSPanel WAF — " + sk + " — OTOMATIK URETILDI, elle duzenlemeyin.\n")
+	b.WriteString("# SanalPanel WAF — " + sk + " — OTOMATIK URETILDI, elle duzenlemeyin.\n")
 	b.WriteString("# Mod + paranoya panelden yonetilir (domain override > plan varsayilani).\n")
 	b.WriteString("Include " + wafModsecDir + "/modsecurity.conf\n")
 	b.WriteString("SecRuleEngine " + engine + "\n")
@@ -149,7 +149,7 @@ func buildModSec(sk string) string {
 		return ""
 	}
 	if !WAFModulYuklu() {
-		log.Printf("waf: %s WAF-etkin ama ModSecurity modulu yuklu DEGIL — WAF ATLANDI (vhost saglam). 'girginospanel-waf-setup' calistirin.", sk)
+		log.Printf("waf: %s WAF-etkin ama ModSecurity modulu yuklu DEGIL — WAF ATLANDI (vhost saglam). 'sanalpanel-waf-setup' calistirin.", sk)
 		return ""
 	}
 	if err := wafDomainConfYaz(sk, engine, paranoya); err != nil {
@@ -203,7 +203,7 @@ func HealWAFOnStartup() {
 	}
 	if aktifSayi > 0 && !modul {
 		log.Printf("waf heal: %d WAF-etkin domain var ama ModSecurity modulu YUKLU DEGIL — "+
-			"'girginospanel-waf-setup' calistirilmali (WAF su an PASIF, vhost'lar saglam)", aktifSayi)
+			"'sanalpanel-waf-setup' calistirilmali (WAF su an PASIF, vhost'lar saglam)", aktifSayi)
 	} else {
 		log.Printf("waf heal: modul=%v, WAF-etkin domain=%d", modul, aktifSayi)
 	}

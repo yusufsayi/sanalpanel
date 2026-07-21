@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/kaynaklimit"
-	"girginospanel/internal/provisioner"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/kaynaklimit"
+	"sanalpanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )

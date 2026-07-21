@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // DesteklenenSurumler: panelin sunduğu PHP sürümleri. 🔴 5.6/7.0-7.3 EOL ve AlmaLinux 10
@@ -345,14 +345,14 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// GirginOSPanel default: buyuk form/import (phpMyAdmin, WordPress) icin max_input_vars
+	// SanalPanel default: buyuk form/import (phpMyAdmin, WordPress) icin max_input_vars
 	phpdDir := "/etc/php.d"
 	if m.Kaynak == "remi" {
 		phpdDir = "/etc/opt/remi/php" + m.Kod + "/php.d"
 	}
 	if err := os.MkdirAll(phpdDir, 0755); err == nil {
-		_ = os.WriteFile(filepath.Join(phpdDir, "99-girginospanel-input.ini"),
-			[]byte("; GirginOSPanel: buyuk form/import (phpMyAdmin, WordPress) - takilma onler\nmax_input_vars = 10000\n"), 0644)
+		_ = os.WriteFile(filepath.Join(phpdDir, "99-sanalpanel-input.ini"),
+			[]byte("; SanalPanel: buyuk form/import (phpMyAdmin, WordPress) - takilma onler\nmax_input_vars = 10000\n"), 0644)
 	}
 
 	// FPM servis enable + start

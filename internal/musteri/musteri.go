@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/auth"
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/auth"
+	"sanalpanel/internal/httpx"
 )
 
 type Handlers struct {

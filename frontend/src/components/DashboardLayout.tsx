@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import TopBar from './TopBar'
@@ -44,8 +44,8 @@ const NAV: NavGroup[] = [
 ]
 
 export default function DashboardLayout() {
-  const isMusteri = typeof window !== 'undefined' && localStorage.getItem('girginospanel.musteri') === '1'
-  const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('girginospanel.musteri.domain_id') || '' : ''
+  const isMusteri = typeof window !== 'undefined' && localStorage.getItem('sanalpanel.musteri') === '1'
+  const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('sanalpanel.musteri.domain_id') || '' : ''
 
   const [acikGruplar, setAcikGruplar] = useState<Record<string, boolean>>({
     'Barındırma Hizmetleri': true,
@@ -87,7 +87,7 @@ export default function DashboardLayout() {
               <path d="M9 10h14v3H9zM9 15h14v3H9zM9 20h9v3H9z" />
             </svg>
           </div>
-          <span className="text-base font-semibold text-slate-900 dark:text-slate-100">GirginOSPanel</span>
+          <span className="text-base font-semibold text-slate-900 dark:text-slate-100">SanalPanel</span>
         </div>
 
         <nav className="flex-1 px-2 py-3 overflow-y-auto">

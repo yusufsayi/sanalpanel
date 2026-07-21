@@ -13,48 +13,48 @@ import (
 	"syscall"
 	"time"
 
-	"girginospanel/internal/accounts"
-	"girginospanel/internal/antivirus"
-	"girginospanel/internal/auth"
-	"girginospanel/internal/backups"
-	"girginospanel/internal/composer"
-	"girginospanel/internal/config"
-	"girginospanel/internal/cron"
-	"girginospanel/internal/db"
-	"girginospanel/internal/dns"
-	"girginospanel/internal/domains"
-	"girginospanel/internal/eklenti"
-	"girginospanel/internal/files"
-	"girginospanel/internal/git"
-	githubpkg "girginospanel/internal/github"
-	"girginospanel/internal/guvenlikduvari"
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/istatistik"
-	"girginospanel/internal/kaynak"
-	"girginospanel/internal/kaynaklimit"
-	"girginospanel/internal/logs"
-	"girginospanel/internal/mail"
-	"girginospanel/internal/middleware"
-	"girginospanel/internal/monitor"
-	"girginospanel/internal/musteri"
-	"girginospanel/internal/nginxset"
-	"girginospanel/internal/paketler"
-	"girginospanel/internal/performans"
-	"girginospanel/internal/php"
-	"girginospanel/internal/phpext"
-	"girginospanel/internal/phpsurum"
-	"girginospanel/internal/plans"
-	"girginospanel/internal/pma"
-	"girginospanel/internal/provisioner"
-	"girginospanel/internal/redis"
-	"girginospanel/internal/sifrekoruma"
-	"girginospanel/internal/sitekopya"
-	"girginospanel/internal/sshaccess"
-	"girginospanel/internal/subdomain"
-	"girginospanel/internal/system"
-	"girginospanel/internal/users"
-	"girginospanel/internal/waf"
-	"girginospanel/internal/wordpress"
+	"sanalpanel/internal/accounts"
+	"sanalpanel/internal/antivirus"
+	"sanalpanel/internal/auth"
+	"sanalpanel/internal/backups"
+	"sanalpanel/internal/composer"
+	"sanalpanel/internal/config"
+	"sanalpanel/internal/cron"
+	"sanalpanel/internal/db"
+	"sanalpanel/internal/dns"
+	"sanalpanel/internal/domains"
+	"sanalpanel/internal/eklenti"
+	"sanalpanel/internal/files"
+	"sanalpanel/internal/git"
+	githubpkg "sanalpanel/internal/github"
+	"sanalpanel/internal/guvenlikduvari"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/istatistik"
+	"sanalpanel/internal/kaynak"
+	"sanalpanel/internal/kaynaklimit"
+	"sanalpanel/internal/logs"
+	"sanalpanel/internal/mail"
+	"sanalpanel/internal/middleware"
+	"sanalpanel/internal/monitor"
+	"sanalpanel/internal/musteri"
+	"sanalpanel/internal/nginxset"
+	"sanalpanel/internal/paketler"
+	"sanalpanel/internal/performans"
+	"sanalpanel/internal/php"
+	"sanalpanel/internal/phpext"
+	"sanalpanel/internal/phpsurum"
+	"sanalpanel/internal/plans"
+	"sanalpanel/internal/pma"
+	"sanalpanel/internal/provisioner"
+	"sanalpanel/internal/redis"
+	"sanalpanel/internal/sifrekoruma"
+	"sanalpanel/internal/sitekopya"
+	"sanalpanel/internal/sshaccess"
+	"sanalpanel/internal/subdomain"
+	"sanalpanel/internal/system"
+	"sanalpanel/internal/users"
+	"sanalpanel/internal/waf"
+	"sanalpanel/internal/wordpress"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -104,7 +104,7 @@ func main() {
 	}
 	// Batch5A: mevcut planlı domain'leri per-tenant FPM'e (Seçenek A) ARKA PLANDA + GÜVENLE
 	// (baseline/post self-check + auto-rollback) migrate et. Panel her restart'ında
-	// (girginospanel-update) otomatik döner → mevcut-müşteri cutover'ı plan-driven tamamlanır.
+	// (sanalpanel-update) otomatik döner → mevcut-müşteri cutover'ı plan-driven tamamlanır.
 	// Boot'u bloklamaz (bg goroutine, kendi context'i).
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -119,7 +119,7 @@ func main() {
 	// (tek seferlik reboot bekliyor) sessizce atla. Boot'u bloklamaz (bg goroutine).
 	go kaynaklimit.HealKotaOnStartup(context.Background(), d)
 	// Mail: Postfix/Dovecot config dosyalarının varlığını doğrula + aktif mail_domains'lerin
-	// maildir kök dizinini onar. Eksikse yalnız uyarı loglar (girginospanel-mail-setup henüz
+	// maildir kök dizinini onar. Eksikse yalnız uyarı loglar (sanalpanel-mail-setup henüz
 	// çalıştırılmamış olabilir), fatal değildir.
 	mail.HealMailOnStartup(context.Background(), d)
 
@@ -418,7 +418,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("girginospanel %s — %s üzerinde dinleniyor (env=%s)", version, cfg.ListenAddr, cfg.Env)
+		log.Printf("sanalpanel %s — %s üzerinde dinleniyor (env=%s)", version, cfg.ListenAddr, cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -436,7 +436,7 @@ func main() {
 }
 
 func runMigrations(d *sql.DB) {
-	dir := "/opt/girginospanel/src/migrations"
+	dir := "/opt/sanalpanel/src/migrations"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		log.Printf("migrations dir okunamadı: %v", err)

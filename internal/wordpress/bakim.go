@@ -16,24 +16,24 @@ import (
 // muPluginPHP: süresi dolmayan bakım modu mu-plugin'i.
 const muPluginPHP = `<?php
 /*
- * Plugin Name: GirginOSPanel Bakım Modu
+ * Plugin Name: SanalPanel Bakım Modu
  * Description: Panel tarafından yönetilen kalıcı bakım modu (WP 10dk auto-expiry'sini bypass eder).
  */
 if (php_sapi_name() === 'cli') { return; }
-$gosp_flag = __DIR__ . '/../.girginos-bakim';
-if (!file_exists($gosp_flag)) { return; }
-$gosp_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
-if (strpos($gosp_uri, '/wp-admin') !== false || strpos($gosp_uri, '/wp-login.php') !== false || strpos($gosp_uri, '/wp-cron.php') !== false) { return; }
+$sanal_flag = __DIR__ . '/../.sanal-bakim';
+if (!file_exists($sanal_flag)) { return; }
+$sanal_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+if (strpos($sanal_uri, '/wp-admin') !== false || strpos($sanal_uri, '/wp-login.php') !== false || strpos($sanal_uri, '/wp-cron.php') !== false) { return; }
 if (!headers_sent()) {
     header($_SERVER['SERVER_PROTOCOL'] . ' 503 Service Unavailable', true, 503);
     header('Retry-After: 3600');
     header('Content-Type: text/html; charset=utf-8');
 }
-$gosp_msg = @file_get_contents($gosp_flag);
-if (!$gosp_msg) { $gosp_msg = 'Sitemiz kısa süreli bakımdadır. Lütfen daha sonra tekrar deneyin.'; }
+$sanal_msg = @file_get_contents($sanal_flag);
+if (!$sanal_msg) { $sanal_msg = 'Sitemiz kısa süreli bakımdadır. Lütfen daha sonra tekrar deneyin.'; }
 echo '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bakım Modu</title>';
 echo '<style>body{font-family:system-ui,Segoe UI,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.k{max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,.05)}.l{width:52px;height:52px;background:#ea580c;border-radius:12px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px}h1{font-size:22px;color:#0f172a;margin:0 0 10px}p{color:#64748b;line-height:1.6;margin:0}</style></head>';
-echo '<body><div class="k"><div class="l">&#9881;</div><h1>Bakım Modu</h1><p>' . htmlspecialchars($gosp_msg, ENT_QUOTES, 'UTF-8') . '</p></div></body></html>';
+echo '<body><div class="k"><div class="l">&#9881;</div><h1>Bakım Modu</h1><p>' . htmlspecialchars($sanal_msg, ENT_QUOTES, 'UTF-8') . '</p></div></body></html>';
 exit;
 `
 
@@ -41,8 +41,8 @@ exit;
 func bakimYollari(dir string) (muDir, muFile, flag string) {
 	wpContent := filepath.Join(dir, "wp-content")
 	muDir = filepath.Join(wpContent, "mu-plugins")
-	muFile = filepath.Join(muDir, "girginos-bakim.php")
-	flag = filepath.Join(wpContent, ".girginos-bakim")
+	muFile = filepath.Join(muDir, "sanal-bakim.php")
+	flag = filepath.Join(wpContent, ".sanal-bakim")
 	return
 }
 

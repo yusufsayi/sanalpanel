@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/hesaplar"
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/hesaplar"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -141,14 +141,14 @@ func (h *Handlers) Ayarla(w http.ResponseWriter, r *http.Request) {
 		_ = exec.Command("restorecon", "-R", dir).Run()
 		// SSH parolasını FTP parolasıyla eşitle (parola = FTP)
 		_ = hesaplar.SyncSSHPassword(h.DB, sk)
-		// Chroot jail kur + gosp-ssh grubuna ekle (kendi home'una hapset)
-		_ = exec.Command("/usr/local/bin/girginospanel-jail", "setup", sk).Run()
-		_ = exec.Command("groupadd", "-f", "gosp-ssh").Run()
-		_ = exec.Command("gpasswd", "-a", sk, "gosp-ssh").Run()
+		// Chroot jail kur + sanal-ssh grubuna ekle (kendi home'una hapset)
+		_ = exec.Command("/usr/local/bin/sanalpanel-jail", "setup", sk).Run()
+		_ = exec.Command("groupadd", "-f", "sanal-ssh").Run()
+		_ = exec.Command("gpasswd", "-a", sk, "sanal-ssh").Run()
 	} else {
 		// SSH kapalı: gruptan çıkar + jail söktür + parolayı kilitle
-		_ = exec.Command("gpasswd", "-d", sk, "gosp-ssh").Run()
-		_ = exec.Command("/usr/local/bin/girginospanel-jail", "teardown", sk).Run()
+		_ = exec.Command("gpasswd", "-d", sk, "sanal-ssh").Run()
+		_ = exec.Command("/usr/local/bin/sanalpanel-jail", "teardown", sk).Run()
 		_ = hesaplar.LockSSHPassword(sk)
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
@@ -224,23 +224,23 @@ func b2i(b bool) int {
 }
 
 // EnsureInfra: panel açılışında SSH jail altyapısını hazırlar (idempotent + best-effort).
-//   - girginospanel-jail script'ini /usr/local/bin'e yerleştirir
-//   - gosp-ssh grubunu oluşturur
+//   - sanalpanel-jail script'ini /usr/local/bin'e yerleştirir
+//   - sanal-ssh grubunu oluşturur
 //   - sshd Match chroot config'ini yerleştirir — YALNIZCA `sshd -t` geçerse reload eder,
 //     geçersizse eski haline döndürür (sshd'yi asla bozmaz).
 func EnsureInfra() {
-	const srcDir = "/opt/girginospanel/src/scripts"
+	const srcDir = "/opt/sanalpanel/src/scripts"
 	// 1) jail script
-	if data, err := os.ReadFile(srcDir + "/girginospanel-jail"); err == nil {
-		if e := os.WriteFile("/usr/local/bin/girginospanel-jail", data, 0o755); e == nil {
-			_ = os.Chmod("/usr/local/bin/girginospanel-jail", 0o755)
+	if data, err := os.ReadFile(srcDir + "/sanalpanel-jail"); err == nil {
+		if e := os.WriteFile("/usr/local/bin/sanalpanel-jail", data, 0o755); e == nil {
+			_ = os.Chmod("/usr/local/bin/sanalpanel-jail", 0o755)
 		}
 	}
-	// 2) gosp-ssh grubu
-	_ = exec.Command("groupadd", "-f", "gosp-ssh").Run()
+	// 2) sanal-ssh grubu
+	_ = exec.Command("groupadd", "-f", "sanal-ssh").Run()
 	// 3) sshd Match chroot config — güvenli uygula
-	dst := "/etc/ssh/sshd_config.d/50-gosp-jail.conf"
-	src, err := os.ReadFile(srcDir + "/50-gosp-jail.conf")
+	dst := "/etc/ssh/sshd_config.d/50-sanal-jail.conf"
+	src, err := os.ReadFile(srcDir + "/50-sanal-jail.conf")
 	if err != nil {
 		return
 	}
@@ -263,5 +263,5 @@ func EnsureInfra() {
 		return
 	}
 	_ = exec.Command("systemctl", "reload", "sshd").Run()
-	log.Printf("SSH jail altyapısı hazır (script + gosp-ssh + sshd chroot config)")
+	log.Printf("SSH jail altyapısı hazır (script + sanal-ssh + sshd chroot config)")
 }

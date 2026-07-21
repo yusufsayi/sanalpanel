@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -50,7 +50,7 @@ export default function LoginPage() {
             </svg>
           </div>
           <div className="ml-3">
-            <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">GirginOSPanel</div>
+            <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">SanalPanel</div>
             <div className="text-xs text-slate-500 dark:text-slate-500">Hosting Kontrol Paneli</div>
           </div>
         </div>
@@ -119,7 +119,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-6">
-          GirginOSPanel · sürüm 0.2.0-f1
+          SanalPanel · sürüm 0.2.0-f1
         </p>
       </div>
     </div>

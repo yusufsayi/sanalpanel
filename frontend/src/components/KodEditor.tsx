@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
 import CodeMirror, { EditorView } from '@uiw/react-codemirror'
 import { html } from '@codemirror/lang-html'

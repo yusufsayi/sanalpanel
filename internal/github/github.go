@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/middleware"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -90,7 +90,7 @@ func ghCall(ctx context.Context, method, path, token string, body any) ([]byte, 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "GirginOSPanel/1.0")
+	req.Header.Set("User-Agent", "SanalPanel/1.0")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

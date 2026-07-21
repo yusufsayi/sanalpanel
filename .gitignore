@@ -6,8 +6,8 @@ npm-debug.log*
 yarn-error.log*
 
 # --- Go build çıktıları (kök seviyede yerel derleme) ---
-/girginospanel-server
-/girginospanel-seed-admin
+/sanalpanel-server
+/sanalpanel-seed-admin
 /server
 *.exe
 *.test

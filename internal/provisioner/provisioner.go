@@ -29,7 +29,7 @@ var (
 var pkgDB *sql.DB
 
 // Init: paket DB handle'ını ayarlar (askıya-alma tutarlılığı için) ve açılışta
-// (her boot) fastcgi_cache "girgincache" zone tanımını GARANTİ EDİP nginx'i
+// (her boot) fastcgi_cache "sanalcache" zone tanımını GARANTİ EDİP nginx'i
 // reload eder. Böylece "kullanım var, tanım yok" durumundaki MEVCUT sunucular
 // yalnızca güncelleme + panel restart ile ELLE müdahale olmadan kendiliğinden
 // onarılır (heal-on-startup).
@@ -50,7 +50,7 @@ func Init(d *sql.DB) {
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
-	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
+	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/sanalpanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
 	EnsureTenantFPMOnStartup()  // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
 	HealWAFOnStartup()          // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
@@ -58,58 +58,58 @@ func Init(d *sql.DB) {
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
 // http-context'e (conf.d nginx.conf http{} içine include edilir) yazılır.
-const cacheZoneConf = "/etc/nginx/conf.d/girgincache.conf"
+const cacheZoneConf = "/etc/nginx/conf.d/sanalcache.conf"
 
 // cacheZoneTempConf: elle eklenmiş GEÇİCİ mitigasyon dosyası (aynı zone'u tanımlar).
 // Panel kendi yönetilen dosyasını yazmadan ÖNCE bunu kaldırır; aksi halde iki
-// "keys_zone=girgincache" tanımı → nginx "duplicate zone" ile patlar.
-const cacheZoneTempConf = "/etc/nginx/conf.d/00-girgincache-gecici.conf"
+// "keys_zone=sanalcache" tanımı → nginx "duplicate zone" ile patlar.
+const cacheZoneTempConf = "/etc/nginx/conf.d/00-sanalcache-gecici.conf"
 
 // cacheZoneName: vhost template'inde kullanılan zone adı ile AYNI olmalı.
-const cacheZoneName = "girgincache"
+const cacheZoneName = "sanalcache"
 
 // cacheZoneDir: fastcgi_cache_path disk dizini.
-const cacheZoneDir = "/var/cache/nginx/girgincache"
+const cacheZoneDir = "/var/cache/nginx/sanalcache"
 
-// cacheZoneBody: girgincache.conf içeriği (idempotent — sabit yol + sabit içerik).
-const cacheZoneBody = `# GirginOSPanel tarafından otomatik yönetilir — ELLE DÜZENLEMEYİN.
-# vhost'lar "fastcgi_cache girgincache" kullanır; zone tanımı burada garanti edilir.
+// cacheZoneBody: sanalcache.conf içeriği (idempotent — sabit yol + sabit içerik).
+const cacheZoneBody = `# SanalPanel tarafından otomatik yönetilir — ELLE DÜZENLEMEYİN.
+# vhost'lar "fastcgi_cache sanalcache" kullanır; zone tanımı burada garanti edilir.
 # Her vhost render'ında ve panel açılışında yeniden yazılır (idempotent).
 fastcgi_cache_path ` + cacheZoneDir + ` levels=1:2 keys_zone=` + cacheZoneName + `:100m max_size=1g inactive=60m use_temp_path=off;
 `
 
 // zoneDefinedElsewhereRe: nginx.conf veya başka bir conf.d dosyasında elle
-// tanımlanmış girgincache zone'unu tespit eder (çift tanım = nginx -t hatası).
+// tanımlanmış sanalcache zone'unu tespit eder (çift tanım = nginx -t hatası).
 var zoneDefinedElsewhereRe = regexp.MustCompile(`keys_zone\s*=\s*` + regexp.QuoteMeta(cacheZoneName) + `\s*:`)
 
-// HealCacheZoneOnStartup: açılışta girgincache zone tanımını garanti eder ve
+// HealCacheZoneOnStartup: açılışta sanalcache zone tanımını garanti eder ve
 // (yalnızca bir değişiklik yapıldıysa ve config geçerliyse) nginx'i reload eder.
 // Bu, güncelleme sonrası restart'ta "tanım yok" sunucuların canlı olarak onarılmasını
 // sağlar. nginx -t hâlâ başarısızsa reload ATLANIR (çalışan nginx'i bozmayız).
 func HealCacheZoneOnStartup() {
 	changed, err := ensureCacheZone()
 	if err != nil {
-		log.Printf("girgincache heal: zone conf yazılamadı: %v", err)
+		log.Printf("sanalcache heal: zone conf yazılamadı: %v", err)
 		return
 	}
 	if !changed {
 		return // config zaten tutarlı, gereksiz reload yok
 	}
 	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
-		log.Printf("girgincache heal: nginx -t hâlâ başarısız, reload atlandı: %s", strings.TrimSpace(string(out)))
+		log.Printf("sanalcache heal: nginx -t hâlâ başarısız, reload atlandı: %s", strings.TrimSpace(string(out)))
 		return
 	}
 	if out, err := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); err != nil {
-		log.Printf("girgincache heal: nginx reload: %s", strings.TrimSpace(string(out)))
+		log.Printf("sanalcache heal: nginx reload: %s", strings.TrimSpace(string(out)))
 		return
 	}
-	log.Printf("girgincache heal: zone tanımı garanti edildi + nginx reload OK")
+	log.Printf("sanalcache heal: zone tanımı garanti edildi + nginx reload OK")
 }
 
-// ensureCacheZone: "girgincache" fastcgi_cache zone tanımının nginx http-context'te
+// ensureCacheZone: "sanalcache" fastcgi_cache zone tanımının nginx http-context'te
 // TAM OLARAK BİR KEZ mevcut olmasını garanti eder. Kendi yönettiğimiz conf dosyasını
 // idempotent yazar. Duplicate zone'u (nginx -t "zone is already defined") önlemek için:
-//   - Bilinen geçici mitigasyon dosyasını (00-girgincache-gecici.conf) kaldırır.
+//   - Bilinen geçici mitigasyon dosyasını (00-sanalcache-gecici.conf) kaldırır.
 //   - Zone BAŞKA bir dosyada (nginx.conf / elle eklenmiş conf) zaten tanımlıysa kendi
 //     dosyasını yazmaz/kaldırır (dış tanıma saygı gösterir).
 //
@@ -124,7 +124,7 @@ func ensureCacheZone() (changed bool, err error) {
 	_, _ = exec.Command("restorecon", "-R", cacheZoneDir).CombinedOutput()
 
 	// Geçici mitigasyon dosyasını (varsa) kaldır — DUPLICATE zone riskini yok et.
-	// Panel tek yönetilen dosyayı (girgincache.conf) kullanır.
+	// Panel tek yönetilen dosyayı (sanalcache.conf) kullanır.
 	if _, e := os.Stat(cacheZoneTempConf); e == nil {
 		if os.Remove(cacheZoneTempConf) == nil {
 			changed = true
@@ -147,13 +147,13 @@ func ensureCacheZone() (changed bool, err error) {
 		return changed, nil
 	}
 	if e := os.WriteFile(cacheZoneConf, []byte(cacheZoneBody), 0644); e != nil {
-		return changed, fmt.Errorf("girgincache zone conf yaz: %w", e)
+		return changed, fmt.Errorf("sanalcache zone conf yaz: %w", e)
 	}
 	_, _ = exec.Command("restorecon", cacheZoneConf).CombinedOutput()
 	return true, nil
 }
 
-// zoneDefinedElsewhere: girgincache zone'unun bizim yönettiğimiz dosya DIŞINDA
+// zoneDefinedElsewhere: sanalcache zone'unun bizim yönettiğimiz dosya DIŞINDA
 // (nginx.conf veya başka bir conf.d/*.conf) tanımlı olup olmadığını döner.
 func zoneDefinedElsewhere() bool {
 	files := []string{"/etc/nginx/nginx.conf"}
@@ -312,7 +312,7 @@ server {
         fastcgi_param HTTPS on;
         fastcgi_read_timeout 60s;
         # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
-{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache girgincache;
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache sanalcache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -337,7 +337,7 @@ server {
 
 {{if .EkDirektifler}}    # ---- Ek direktifler (kullanıcı) ----
     {{.EkDirektifler}}
-{{end}}    # GirginOSPanel managed (SSL: {{.SSLKaynak}}) — {{.AlanAdi}}
+{{end}}    # SanalPanel managed (SSL: {{.SSLKaynak}}) — {{.AlanAdi}}
 }
 {{- else -}}
 server {
@@ -393,7 +393,7 @@ server {
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_read_timeout 60s;
         # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
-{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache girgincache;
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache sanalcache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -418,7 +418,7 @@ server {
 
 {{if .EkDirektifler}}    # ---- Ek direktifler (kullanıcı) ----
     {{.EkDirektifler}}
-{{end}}    # GirginOSPanel managed — {{.AlanAdi}} (HTTP only, PHP {{.PHPSurum}})
+{{end}}    # SanalPanel managed — {{.AlanAdi}} (HTTP only, PHP {{.PHPSurum}})
 }
 {{- end -}}
 `))
@@ -475,7 +475,7 @@ func buildSecurityHeaders(o VhostOpts) string {
 
 // suspendedVhostTmpl — "Hesabı Askıya Al" için: acme-challenge hariç TÜM istekler 503.
 // SSL sertifikası varsa 443'te de servis edilir (böylece askıdayken bile cert yenilenebilir).
-var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} — GirginOSPanel tarafından ASKIYA ALINDI
+var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} — SanalPanel tarafından ASKIYA ALINDI
 server {
     listen 80;
     listen [::]:80;
@@ -732,9 +732,9 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	if err := os.WriteFile(cfgPath, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("vhost yaz: %w", err)
 	}
-	// Fail-safe: vhost "fastcgi_cache girgincache" kullanabilir; zone tanımının
+	// Fail-safe: vhost "fastcgi_cache sanalcache" kullanabilir; zone tanımının
 	// http-context'te mevcut olduğunu nginx -t ÖNCESİ garanti et. Aksi halde
-	// "zone girgincache is unknown" → nginx -t patlar → suspend/unsuspend takılır.
+	// "zone sanalcache is unknown" → nginx -t patlar → suspend/unsuspend takılır.
 	// (Sadece bu domain değil, cache etkin BAŞKA bir domain'in vhost'u da global
 	// nginx -t'yi kırabildiği için her render'da garanti ediyoruz.)
 	if _, err := ensureCacheZone(); err != nil {
@@ -865,7 +865,7 @@ func Deprovision(alanAdi, sk string) error {
 	}
 	// Per-tenant FPM (Seçenek A) izlerini kaldır (servis + unit + config + run dizini + .bak).
 	TeardownTenantFPM(sk)
-	// Sistem SSL cert dizinini temizle (/etc/pki/girginospanel/<domain>) — userdel home'u siler
+	// Sistem SSL cert dizinini temizle (/etc/pki/sanalpanel/<domain>) — userdel home'u siler
 	// ama cert artık sistemde; orphan kalmasın.
 	if alanAdi != "" && ValidateDomain(alanAdi) == nil {
 		_ = os.RemoveAll(certSystemDir(alanAdi))
@@ -921,7 +921,7 @@ func SetPHPVersion(alanAdi, sk, yeniSurum, certPath, keyPath, sslKaynak, backend
 
 // certSystemBaseDir: SSL cert/key'lerin yazıldığı SİSTEM kökü (SELinux cert_t; nginx
 // httpd_t okur). Home (user_home_t) DEĞİL.
-const certSystemBaseDir = "/etc/pki/girginospanel"
+const certSystemBaseDir = "/etc/pki/sanalpanel"
 
 // certSystemDir: bir domain'in SSL cert/key sistem dizini. 🔴 Home'a değil buraya yazarız:
 // Enforcing'de nginx(httpd_t) home'daki cert'i (user_home_t) okuyamaz → "cannot load
@@ -1069,7 +1069,7 @@ func copyFile(src, dst string, perm os.FileMode) bool {
 
 // HealSSLCertPathsOnStartup: SSL'li domain'lerin cert'i HOME'daysa (user_home_t → nginx
 // httpd_t okuyamaz, Enforcing'de "cannot load certificate ... Permission denied" → reload
-// fail → site down) /etc/pki/girginospanel/<domain>/'ye TAŞIR: kopyala + restorecon (cert_t)
+// fail → site down) /etc/pki/sanalpanel/<domain>/'ye TAŞIR: kopyala + restorecon (cert_t)
 // + DB cert_path/key_path repoint + vhost re-render + home artığını temizle. İdempotent
 // (cert zaten sistemdeyse WHERE ile hiç seçilmez). Init'ten her boot çağrılır → mevcut
 // bozuk kurulumlar update'te self-heal olur.
@@ -1152,7 +1152,7 @@ var ensureArchiveToolsOnce sync.Once
 // araçlarını sistemde GARANTİ EDER — panel açılışında, HealHomePerms + dosya yöneticisi RAR
 // extract onlara güvenmeden ÖNCE.
 //
-// 🔴 Neden gerekli (chicken-egg): `girginospanel-update` önce KENDİNİ günceller; araç kuran
+// 🔴 Neden gerekli (chicken-egg): `sanalpanel-update` önce KENDİNİ günceller; araç kuran
 // `dnf install acl bsdtar` adımı yalnız YENİ update-script'te vardır → İLK update'te çalışmaz.
 // Araçlar yoksa hardenHomePerms fail-safe grup=nginx modeline düşer (per-user ACL ancak 2.
 // update'te gelir) ve .rar açılamaz. Bu heal, araçları panelin kendi açılışında kurar → İLK
@@ -1198,7 +1198,7 @@ func aclVar() bool {
 // olduğunu işaretler. Recursive setfacl O(dosya) olduğu için her boot'ta değil yalnız ilk
 // dönüşümde çalışır (default-ACL sayesinde sonraki dosyalar OTOMATİK miras alır → tekrar gereksiz).
 // Silinirse bir sonraki panel restart'ında recursive dönüşüm yeniden koşar (elle yeniden tetik).
-const permsACLSentinel = "/var/lib/girginospanel/.perms_acl_v1_done"
+const permsACLSentinel = "/var/lib/sanalpanel/.perms_acl_v1_done"
 
 // hardenHomePerms: tenant ev dizini + public_html için PER-USER (Plesk benzeri) izolasyon
 // izinlerini uygular. Dosyalar sitenin KENDİ kullanıcısındadır (c_X:c_X — grup nginx DEĞİL);
@@ -1325,7 +1325,7 @@ func SuspendUserRuntime(sk string, suspend bool) {
 	if !strings.HasPrefix(sk, "c_") {
 		return // güvenlik: yalnız tenant user
 	}
-	const suspendStore = "/var/lib/girginospanel/cron-suspended"
+	const suspendStore = "/var/lib/sanalpanel/cron-suspended"
 	cronSpool := "/var/spool/cron/" + sk
 	stored := filepath.Join(suspendStore, sk)
 
@@ -1376,7 +1376,7 @@ func welcomeHTML(domain string) string {
   <h1>%s</h1>
   <p>Web sitesi başarıyla oluşturuldu.</p>
   <p>İçerik yüklemek için FTP veya dosya yöneticisini kullanın.</p>
-  <p class="muted">Web kökü: <code>public_html/</code> · PHP destekli · GirginOSPanel ile yönetiliyor</p>
+  <p class="muted">Web kökü: <code>public_html/</code> · PHP destekli · SanalPanel ile yönetiliyor</p>
 </div>
 </body>
 </html>`, domain, domain)
@@ -1558,7 +1558,7 @@ func buildProtectedBlocks(db *sql.DB, domainID int64, socket string) string {
 // vhostHardenSentinel: retroaktif vhost/pool re-render'inin YALNIZ BIR KEZ
 // calismasini garanti eden isaret dosyasi. Silinirse bir sonraki panel restart'inda
 // re-render tekrar calisir (elle yeniden tetikleme).
-const vhostHardenSentinel = "/var/lib/girginospanel/.vhost_hardening_v2_done"
+const vhostHardenSentinel = "/var/lib/sanalpanel/.vhost_hardening_v2_done"
 
 // HealVhostsOnStartup: MEVCUT tum domainlerin php-fpm pool + nginx vhost'unu YENI
 // (sertlestirilmis) template ile bir kez yeniden render eder. Template degisikligi
@@ -1640,7 +1640,7 @@ const panelVhostPath = "/etc/nginx/conf.d/_panel.conf"
 
 // panelSecSentinel: panel vhost'una guvenlik header'lari enjekte edildiginde eklenen
 // isaret satiri. Idempotency icin (iki kez eklemeyi onler).
-const panelSecSentinel = "# GOSP-PANEL-SEC v2"
+const panelSecSentinel = "# SANAL-PANEL-SEC v2"
 
 // HealPanelVhostHeadersOnStartup: kurulu panel vhost'una (yoksa sessiz gecer)
 // guvenlik header'larini SERVER seviyesinde ekler. Panel React SPA (location /) ve
@@ -1693,7 +1693,7 @@ func HealPanelVhostHeadersOnStartup() {
 
 // panelIndexNoCacheSentinel: panel `location /` (SPA/index.html) bloguna no-cache
 // header'lari eklendiginde konan isaret. Idempotency icin.
-const panelIndexNoCacheSentinel = "# GOSP-PANEL-NOCACHE v1"
+const panelIndexNoCacheSentinel = "# SANAL-PANEL-NOCACHE v1"
 
 // panelIndexLocRe: panel vhost'unun SPA fallback location'ini (index.html) yakalar.
 // Installer'in yazdigi kanonik bicim: `location / { try_files $uri $uri/ /index.html; }`.

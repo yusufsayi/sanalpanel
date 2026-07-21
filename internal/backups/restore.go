@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/archivex"
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/archivex"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,7 +54,7 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Geçici extract dizini
-	tmpDir, _ := os.MkdirTemp("", "gosp-restore-*")
+	tmpDir, _ := os.MkdirTemp("", "sanal-restore-*")
 	defer os.RemoveAll(tmpDir)
 
 	// GÜVENLİK: yedek arşivi ROOT olarak açılırsa, içindeki symlink üyeleri /root

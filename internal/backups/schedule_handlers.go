@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // GET /domains/{id}/backup-schedule

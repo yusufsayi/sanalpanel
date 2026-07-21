@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 )
 
 // TemplateRow: şablondaki tek kayıt satırı.

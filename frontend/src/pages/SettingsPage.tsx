@@ -109,7 +109,7 @@ export default function SettingsPage() {
     setTOk(''); setTYuk(true)
     try {
       await api.put('/me', { ad_soyad: ad, eposta, tercih_tema: tema, tercih_dil: dil })
-      try { localStorage.setItem('gosp.tema', tema) } catch { /* yoksay */ }
+      try { localStorage.setItem('sanal.tema', tema) } catch { /* yoksay */ }
       setTOk('Tercihler kaydedildi.'); setTimeout(() => setTOk(''), 3000)
     } catch { setTOk('') } finally { setTYuk(false) }
   }

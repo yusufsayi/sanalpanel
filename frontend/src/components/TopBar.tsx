@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
@@ -14,8 +14,8 @@ export default function TopBar() {
 
   useEffect(() => {
     const h = (e: Event) => setTema((e as CustomEvent<Theme>).detail)
-    window.addEventListener('gosp:theme-change', h)
-    return () => window.removeEventListener('gosp:theme-change', h)
+    window.addEventListener('sanal:theme-change', h)
+    return () => window.removeEventListener('sanal:theme-change', h)
   }, [])
 
   function temaDegistir() {

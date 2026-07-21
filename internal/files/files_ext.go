@@ -15,8 +15,8 @@ import (
 	"strings"
 	"syscall"
 
-	"girginospanel/internal/archivex"
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/archivex"
+	"sanalpanel/internal/httpx"
 )
 
 // jailJoinStrict: symlink-aware. Parent dizini EvalSymlinks ile resolve eder,

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/httpx"
-	"girginospanel/internal/kaynaklimit"
+	"sanalpanel/internal/httpx"
+	"sanalpanel/internal/kaynaklimit"
 
 	"github.com/go-chi/chi/v5"
 )

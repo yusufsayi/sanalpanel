@@ -1,5 +1,5 @@
-// gosp-dark-swept
-// gosp-dark-swept-v2
+// sanal-dark-swept
+// sanal-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -92,7 +92,7 @@ export default function DomainWafPage() {
       {y && !y.modul_yuklu && (
         <div className="mb-5 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
           <strong>ModSecurity modülü sunucuda kurulu değil.</strong> Ayarlar kaydedilir ancak WAF uygulanmaz.
-          Sunucuda <code className="font-mono">girginospanel-waf-setup</code> çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).
+          Sunucuda <code className="font-mono">sanalpanel-waf-setup</code> çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).
         </div>
       )}
 

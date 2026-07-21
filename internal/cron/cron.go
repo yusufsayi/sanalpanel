@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/httpx"
+	"sanalpanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -22,7 +22,7 @@ import (
 const (
 	maxGorev    = 100
 	maxKomut    = 1024
-	bannerLine  = "# girginospanel cron — bu dosya panel tarafindan yonetiliyor; elle duzenlemeyin"
+	bannerLine  = "# sanalpanel cron — bu dosya panel tarafindan yonetiliyor; elle duzenlemeyin"
 )
 
 type Gorev struct {
@@ -95,7 +95,7 @@ func read(sk string) ([]Gorev, error) {
 		if strings.HasPrefix(line, "#") {
 			c := strings.TrimSpace(strings.TrimPrefix(line, "#"))
 			// kendi banner satirimizi atla
-			if !strings.HasPrefix(c, "girginospanel") {
+			if !strings.HasPrefix(c, "sanalpanel") {
 				lastYorum = c
 			}
 			continue

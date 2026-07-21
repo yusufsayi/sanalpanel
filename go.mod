@@ -1,4 +1,4 @@
-module girginospanel
+module sanalpanel
 
 go 1.23
 
