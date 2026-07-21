@@ -27,6 +27,7 @@ const ICONS = {
   dns:       'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   redis:     'M13 10V3L4 14h7v7l9-11h-7z',
   waf:       'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  posta:     'M3 8l9 6 9-6m-9 6V4m0 0v16',
 }
 
 function Grup({ baslik, children }: { baslik: string; children: React.ReactNode }) {
@@ -50,6 +51,10 @@ export default function DomainPano({ domain }: { domain: Domain }) {
       <Grup baslik="Alan Adı ve DNS">
         <ToolCard etiket="DNS Yönetimi"          aciklama="A, MX, TXT, CNAME kayıtları" ikon={ICONS.dns}       renk="sky"  onClick={git('dns')} />
         <ToolCard etiket="Subdomainler"          aciklama="Alt alan adları"   ikon={ICONS.subdomain} renk="teal" onClick={git('subdomainler')} />
+      </Grup>
+
+      <Grup baslik="E-posta">
+        <ToolCard etiket="E-posta Hesapları" aciklama="Postfix/Dovecot posta kutuları · SMTP" ikon={ICONS.posta} renk="indigo" onClick={git('mail')} />
       </Grup>
 
       <Grup baslik="Dosyalar ve Veritabanları">

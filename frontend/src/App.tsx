@@ -25,6 +25,7 @@ import RedisPage from '@/pages/RedisPage'
 import DomainConnectionPage from '@/pages/DomainConnectionPage'
 import DomainDatabasesPage from '@/pages/DomainDatabasesPage'
 import DomainFTPPage from '@/pages/DomainFTPPage'
+import DomainMailPage from '@/pages/DomainMailPage'
 import DomainPHPPage from '@/pages/DomainPHPPage'
 import DomainBackupsPage from '@/pages/DomainBackupsPage'
 import DomainGitPage from '@/pages/DomainGitPage'
@@ -90,6 +91,7 @@ export default function App() {
         <Route path="abonelikler/:id/gunlukler"     element={<DomainLogsPage />} />
         <Route path="abonelikler/:id/dns"           element={<DomainDNSPage />} />
         <Route path="abonelikler/:id/redis"         element={<RedisPage />} />
+        <Route path="abonelikler/:id/mail"          element={<DomainMailPage />} />
         <Route path="abonelikler/:id/yedekler"      element={<DomainBackupsPage />} />
         <Route path="abonelikler/:id/git"           element={<DomainGitPage />} />
         <Route path="abonelikler/:id/web-sunucu"    element={<DomainWebSunucuPage />} />
