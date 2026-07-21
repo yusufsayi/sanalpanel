@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"sanalpanel/internal/provisioner"
 )
 
@@ -284,6 +286,23 @@ const (
 // reKotaSK: sistem kullanıcı allowlist'i. provisioner.SlugFromDomain "c_" + [a-z0-9_] üretir.
 // xfs_quota arg-slice'ına YALNIZ buradan geçen sk gider → shell/arg injection kapalı.
 var reKotaSK = regexp.MustCompile(`^c_[a-z0-9_]{1,60}$`)
+
+// xfsSuperMagic: statfs(2) f_type değeri XFS için (bkz. linux/magic.h). golang.org/x/sys/unix
+// bu sabiti export etmiyor, kernel ABI'si sabit olduğu için burada elle tanımlanır.
+const xfsSuperMagic = 0x58465342
+
+// KotaFSUyumlu: kotaMount (kök "/") dosya sistemi XFS mi. Disk kotası YALNIZ XFS user-quota
+// ile çalışır (bkz. yukarıdaki paket notu) — ext4/btrfs/vb üzerinde kalıcı olarak desteklenmez,
+// reboot bunu ÇÖZMEZ; tek çözüm sunucunun XFS root ile yeniden kurulmasıdır. statfs
+// başarısızsa temkinli davranılır (true dönülür) — "desteklenmiyor" gibi kalıcı/net bir
+// hüküm yerine, çağıran taraf (KotaRebootGerekli) mevcut xfs_quota tabanlı reboot-mesajına düşer.
+func KotaFSUyumlu() bool {
+	var st unix.Statfs_t
+	if err := unix.Statfs(kotaMount, &st); err != nil {
+		return true
+	}
+	return int64(st.Type) == xfsSuperMagic
+}
 
 // mountKotaAktif: kök fs'te XFS user quota accounting/enforcement açık mı.
 // `xfs_quota -x -c 'state -u' /` çıktısını parse eder; noquota'da çıktı boş → (false,false).

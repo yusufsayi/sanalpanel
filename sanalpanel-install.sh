@@ -29,7 +29,7 @@ die(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
 [ -d "$A" ] || die "assets/ bulunamadı ($A)"
 grep -qiE "AlmaLinux|Rocky|Red Hat|CentOS" /etc/os-release || warn "AlmaLinux/RHEL10 bekleniyordu — devam ediliyor"
 
-PHP_VERS="74 80 81 82 83 84 85 86"
+PHP_VERS="74 80 81 82 83 84 85"
 PHP_EXT="fpm cli mysqlnd mbstring bcmath intl gd soap opcache pdo xml zip pgsql ldap"
 
 # ============ 1) REPO ============

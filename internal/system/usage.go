@@ -90,6 +90,11 @@ type Usage struct {
 	// KotaRebootGerekli: disk kotası enforcement AKTİF DEĞİL (fs noquota / uqnoenforce) →
 	// tek seferlik reboot bekliyor. UI'da sarı uyarı banner'ı bunu okur.
 	KotaRebootGerekli bool `json:"kota_reboot_gerekli"`
+	// KotaFSUyumsuz: kök dosya sistemi XFS DEĞİL → disk kotası bu sunucuda KALICI olarak
+	// desteklenmiyor, reboot bunu çözmez (yalnız XFS root ile yeniden kurulum çözer).
+	// true iken UI, KotaRebootGerekli'nin "reboot bekleniyor" mesajı yerine kalıcı bir
+	// açıklama gösterip banner'ı kapatılabilir kılar.
+	KotaFSUyumsuz bool `json:"kota_fs_uyumsuz"`
 }
 
 type cpuStat struct{ total, idle uint64 }
@@ -567,15 +572,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	var swap SwapUsage
 	var info SystemInfo
 	var kotaReboot bool
+	var kotaFSUyumsuz bool
 
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	go func() { defer wg.Done(); diskler = ReadDiskler() }()
 	go func() { defer wg.Done(); ag = ReadAg() }()
 	go func() { defer wg.Done(); servisler = ReadServisler() }()
 	go func() { defer wg.Done(); swap = ReadSwap() }()
 	go func() { defer wg.Done(); info = ReadInfo() }()
 	go func() { defer wg.Done(); kotaReboot = kaynaklimit.KotaRebootGerekli() }()
+	go func() { defer wg.Done(); kotaFSUyumsuz = !kaynaklimit.KotaFSUyumlu() }()
 	wg.Wait()
 
 	httpx.WriteJSON(w, http.StatusOK, Usage{
@@ -583,5 +590,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		Disk: disk, Diskler: diskler, Ag: ag,
 		Servisler: servisler, UptimeSn: ReadUptime(),
 		KotaRebootGerekli: kotaReboot,
+		KotaFSUyumsuz:     kotaFSUyumsuz,
 	})
 }
