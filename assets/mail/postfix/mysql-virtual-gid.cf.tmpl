@@ -1,0 +1,5 @@
+hosts = 127.0.0.1
+user = mailro
+password = __PANEL_MAIL_DB_PASS__
+dbname = panel
+query = SELECT md.gid_n FROM mailboxes m JOIN mail_domains md ON md.id=m.mail_domain_id WHERE m.email='%s' AND m.status='active' AND md.durum='active'

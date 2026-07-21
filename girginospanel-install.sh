@@ -125,7 +125,7 @@ ok "panel DB + kullanıcı (panel@127.0.0.1)"
 # ============ 5) DİZİNLER + ENV ============
 step "5) Dizinler + env"
 mkdir -p /opt/girginospanel/bin /opt/girginospanel/frontend-dist /opt/girginospanel/src/migrations \
-         /opt/girginospanel/pma-signon /etc/girginospanel /etc/ssl/girginospanel
+         /opt/girginospanel/src/mail-templates /opt/girginospanel/pma-signon /etc/girginospanel /etc/ssl/girginospanel
 JWT=$(openssl rand -hex 32); RADMIN=$(openssl rand -hex 24)
 cat > /etc/girginospanel/env <<ENV
 PANEL_LISTEN=127.0.0.1:8080
@@ -144,6 +144,7 @@ install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-s
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
 tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
 tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
+[ -d "$A/mail" ] && cp -r "$A/mail/"* /opt/girginospanel/src/mail-templates/ && ok "mail config template'leri (postfix/dovecot/opendkim)"
 # ops tool + signon
 for t in "$A"/ops/*; do
   bn=$(basename "$t"); nm="${bn%.sh}"
@@ -345,6 +346,11 @@ if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; el
 # (step 11'de değil çünkü GRANT SELECT ON panel.ftp_accounts tablo yokken patlıyordu)
 sleep 2
 command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
+
+# ---- Posta sunucusu (Postfix/Dovecot/OpenDKIM) — AYNI SEBEPLE ftp-setup ile aynı yerde:
+# GRANT SELECT ON panel.mail_domains/mailboxes/mail_aliases, migration bu tabloları
+# oluşturana kadar (panel ilk açılışı) patlıyor.
+command -v girginospanel-mail-setup >/dev/null 2>&1 && girginospanel-mail-setup >/dev/null 2>&1 && ok "girginospanel-mail-setup (Postfix/Dovecot/OpenDKIM)" || warn "mail-setup atlandı"
 
 # ============ 13) Yönetici erişimi ============
 # 🔴 Panel admin girişi = sunucunun ROOT kullanıcısı (PAM/shadow doğrulaması).

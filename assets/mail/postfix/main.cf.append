@@ -1,0 +1,50 @@
+
+# ===== girginospanel-mail =====
+# Sanal (virtual) posta kutuları — panel DB'sinden CANLI okunur (statik config yeniden
+# üretimi yok, panelde kutu ekle/sil/askıya-al aninda etkilidir).
+mydestination = localhost
+virtual_mailbox_domains = mysql:/etc/postfix/mysql-virtual-domains.cf
+virtual_mailbox_maps    = mysql:/etc/postfix/mysql-virtual-mailboxes.cf
+virtual_alias_maps      = mysql:/etc/postfix/mysql-virtual-aliases.cf
+virtual_mailbox_base    = /home
+virtual_uid_maps        = mysql:/etc/postfix/mysql-virtual-uid.cf
+virtual_gid_maps        = mysql:/etc/postfix/mysql-virtual-gid.cf
+virtual_minimum_uid     = 1000
+virtual_transport       = lmtp:unix:private/dovecot-lmtp
+
+# SASL — Postfix, Dovecot'un auth soketini kullanır (submission/587 giden kimlik
+# doğrulaması buradan geçer; PHPMailer'ın SMTP AUTH ile bağlandığı asıl mekanizma).
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_security_options = noanonymous
+broken_sasl_auth_clients = yes
+
+# TLS — varsayılan olarak panelin kendi self-signed sertifikası (kurulumda zaten
+# üretiliyor, /etc/ssl/girginospanel). Bir müşteri domaininin kendi Let's Encrypt
+# sertifikasıyla mail sunmak istersen bu iki satırı elle o domainin
+# /etc/pki/girginospanel/<domain>/<domain>.{crt,key} yoluna çevirebilirsin.
+smtpd_tls_cert_file = /etc/ssl/girginospanel/panel.crt
+smtpd_tls_key_file  = /etc/ssl/girginospanel/panel.key
+smtpd_tls_security_level = may
+smtp_tls_security_level = may
+smtpd_tls_loglevel = 1
+
+# İlişki/kabul kısıtları — SASL doğrulanmamışsa relay YOK (open relay imkansız).
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+
+# Kötüye-kullanım / hız sınırı (bkz. girginospanel-mail-setup.sh yorumu) — SASL kullanıcı
+# bazında izlenir (anvil), tek bir bozuk/ele-geçirilmiş PHPMailer betiği IP'yi
+# kara-listeye düşürmesin diye.
+smtpd_client_connection_rate_limit = 30
+smtpd_client_message_rate_limit = 60
+anvil_rate_time_unit = 60s
+
+# OpenDKIM milter (assets/mail/opendkim/opendkim.conf.tmpl ile birlikte) — imzalama +
+# doğrulama. dns.EnsureDKIM zaten anahtarları üretip /etc/opendkim/keys altına yazıyor;
+# bu blok yalnızca Postfix'in milter'a bağlanmasını sağlar.
+milter_protocol = 6
+milter_default_action = accept
+smtpd_milters = inet:127.0.0.1:8891
+non_smtpd_milters = inet:127.0.0.1:8891

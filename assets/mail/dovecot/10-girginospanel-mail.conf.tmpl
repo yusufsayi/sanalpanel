@@ -1,0 +1,39 @@
+# GirginOSPanel — Postfix/Dovecot sanal posta kutuları (bkz. internal/mail paketi).
+# Tek yeni drop-in dosyası olarak eklenir (stok 10-*.conf dosyaları elle düzenlenmez) —
+# /etc/dovecot/dovecot.conf zaten "!include conf.d/*.conf" ile bunu otomatik yükler,
+# bu yüzden idempotent kurulum/kaldırma tek dosyayı kopyalamak/silmek kadar basit.
+protocols = imap lmtp
+
+mail_location = maildir:~/
+
+passdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+userdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+# Varsayılan sertifika: panelin kendi self-signed sertifikası (kurulumda zaten üretiliyor).
+# Belirli bir müşteri domaininde gerçek Let's Encrypt sertifikasıyla IMAP/webmail sunmak
+# istersen bir local_name { } bloğuyla /etc/pki/girginospanel/<domain>/... yoluna SNI
+# override ekleyebilirsin (bkz. plan §2b) — v1'de yalnızca tek varsayılan sertifika var.
+ssl_cert = </etc/ssl/girginospanel/panel.crt
+ssl_key = </etc/ssl/girginospanel/panel.key

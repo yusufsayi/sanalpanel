@@ -1,0 +1,15 @@
+
+# ===== girginospanel-mail (submission/587) =====
+# PHPMailer/mail istemcilerinin bağlandığı asıl uç nokta: <sunucu>:587, STARTTLS,
+# AUTH LOGIN/PLAIN (kullanıcı = kutu e-postası, panelde üretilen parola).
+submission inet n       -       n       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_sasl_type=dovecot
+  -o smtpd_sasl_path=private/auth
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject_unauth_destination
+  -o milter_macro_daemon_name=ORIGINATING

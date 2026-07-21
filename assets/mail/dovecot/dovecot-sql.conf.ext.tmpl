@@ -1,0 +1,6 @@
+driver = mysql
+connect = host=127.0.0.1 dbname=panel user=mailro password=__PANEL_MAIL_DB_PASS__
+default_pass_scheme = SHA512-CRYPT
+password_query = SELECT email AS user, password_hash AS password FROM mailboxes WHERE email='%u' AND status='active'
+user_query = SELECT CONCAT('/home/',md.sistem_kullanici,'/mail/',m.local_part) AS home, md.uid_n AS uid, md.gid_n AS gid, CONCAT('maildir:/home/',md.sistem_kullanici,'/mail/',m.local_part) AS mail FROM mailboxes m JOIN mail_domains md ON md.id=m.mail_domain_id WHERE m.email='%u' AND m.status='active' AND md.durum='active'
+iterate_query = SELECT email AS user FROM mailboxes WHERE status='active'

@@ -5,7 +5,7 @@
 #
 # Kullanım:
 #   girginospanel-repair [--dry-run] [--deep] [--only <bölümler>] [--quiet]
-#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon  (varsayılan: hepsi)
+#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,mail  (varsayılan: hepsi)
 #   --dry-run : değişiklikleri UYGULAMADAN neyin düzeltileceğini göster
 #   --deep    : domain ev dizinlerinde RECURSIVE sahiplik onarımı (yavaş, büyük siteler)
 #
@@ -25,7 +25,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon"
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,mail"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -226,6 +226,33 @@ sec_domains() {
   done
 }
 
+sec_mail() {
+  want mail || return 0
+  head_ "posta (Postfix/Dovecot/OpenDKIM)"
+  if ! command -v mysql >/dev/null 2>&1; then warn "mysql client yok, atlanıyor"; return 0; fi
+  local sk
+  while IFS=$'\t' read -r sk; do
+    [ -z "$sk" ] && continue
+    if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
+    ensure_dir "/home/$sk/mail" 750 "$sk:$sk"
+  done < <(mysql -u root -N -e "SELECT sistem_kullanici FROM panel.mail_domains WHERE durum='active'" 2>/dev/null)
+
+  local f
+  for f in /etc/postfix/mysql-virtual-domains.cf /etc/postfix/mysql-virtual-mailboxes.cf \
+           /etc/postfix/mysql-virtual-uid.cf /etc/postfix/mysql-virtual-gid.cf /etc/postfix/mysql-virtual-aliases.cf; do
+    [ -f "$f" ] || continue
+    ensure_owner "$f" "root:postfix"
+    ensure_mode  "$f" 640
+  done
+  if [ -f /etc/dovecot/dovecot-sql.conf.ext ]; then
+    ensure_owner /etc/dovecot/dovecot-sql.conf.ext "root:dovecot"
+    ensure_mode  /etc/dovecot/dovecot-sql.conf.ext 640
+  fi
+  if [ -d /etc/opendkim/keys ]; then
+    ensure_owner /etc/opendkim/keys "opendkim:opendkim" -R
+  fi
+}
+
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_phpmyadmin
@@ -235,6 +262,7 @@ sec_binary
 sec_clamav
 sec_frontend
 sec_signon
+sec_mail
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then
