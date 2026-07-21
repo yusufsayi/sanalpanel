@@ -80,9 +80,13 @@ if [ ! -f /etc/opendkim/TrustedHosts ]; then
   printf '127.0.0.1\nlocalhost\n' > /etc/opendkim/TrustedHosts
 fi
 chown -R opendkim:opendkim /etc/opendkim
-cp "$TMPL/opendkim/opendkim.conf.tmpl" /etc/opendkim/opendkim.conf
-chown root:opendkim /etc/opendkim/opendkim.conf
-log "opendkim.conf + KeyTable/SigningTable/TrustedHosts (boş, panel DKIM ürettikçe dolar)"
+# GERÇEK VPS'TE DOĞRULANDI: RHEL/AlmaLinux opendkim paketi /etc/opendkim/opendkim.conf
+# DEĞİL, /etc/opendkim.conf'u okur (/etc/sysconfig/opendkim: OPTIONS="-x /etc/opendkim.conf").
+# Yanlış yola yazmak servisi hiç etkilemeden stok config'i (KeyFile=.../default.private,
+# yoksa exit 78/CONFIG) çalıştırmaya devam ettirir — sessiz başarısızlık.
+cp "$TMPL/opendkim/opendkim.conf.tmpl" /etc/opendkim.conf
+chown root:opendkim /etc/opendkim.conf
+log "/etc/opendkim.conf + KeyTable/SigningTable/TrustedHosts (boş, panel DKIM ürettikçe dolar)"
 
 echo "════ Maildir kök dizinleri (mevcut aktif mail_domains için, varsa) ════"
 # GÜVENLİK/SIRALAMA: bu betik girginospanel-install.sh'ta panel İLK KEZ başlatıldıktan
