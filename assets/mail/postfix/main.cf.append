@@ -1,5 +1,9 @@
 
 # ===== girginospanel-mail =====
+# GERÇEK VPS'TE BULUNDU: AlmaLinux'un stok main.cf'i inet_interfaces=localhost getiriyor
+# (RHEL ailesinde kasıtlı güvenli varsayılan) — bu satır olmadan Postfix yalnızca 127.0.0.1'i
+# dinler, ne dışarıdan gelen posta (port 25) ne de uzaktan SMTP AUTH (587) ASLA ulaşamaz.
+inet_interfaces = all
 # Sanal (virtual) posta kutuları — panel DB'sinden CANLI okunur (statik config yeniden
 # üretimi yok, panelde kutu ekle/sil/askıya-al aninda etkilidir).
 mydestination = localhost

@@ -26,8 +26,14 @@ fi
 ENV=/etc/girginospanel/env
 
 echo "════ Postfix + Dovecot + OpenDKIM paketleri ════"
-dnf install -y postfix dovecot opendkim >/tmp/mail-setup.log 2>&1 \
-  && log "postfix + dovecot + opendkim kuruldu" || { log "kurulum uyarı (bazı paketler zaten olabilir)"; }
+# GERÇEK VPS'TE BULUNDU: postfix-mysql / dovecot-mysql AYRI paketler — temel postfix/dovecot
+# paketleri MySQL sorgu-harita desteğini İÇERMİYOR. Bunlar olmadan servisler "active" görünür
+# (systemctl başarıyla başlatır) ama her sorguda sessizce başarısız olur: Postfix
+# "unsupported dictionary type: mysql" der, Dovecot auth süreci "Unknown database driver
+# 'mysql'" ile crash-loop'a girer (auth soketi var ama arkasındaki süreç sürekli ölür) —
+# yani TÜM sanal posta kutusu doğrulaması sessizce bozuk kalır, hiçbir hata dışarı sızmaz.
+dnf install -y postfix postfix-mysql dovecot dovecot-mysql opendkim >/tmp/mail-setup.log 2>&1 \
+  && log "postfix(+mysql) + dovecot(+mysql) + opendkim kuruldu" || { log "kurulum uyarı (bazı paketler zaten olabilir)"; }
 
 echo "════ mailro (salt-okunur) DB parolası ════"
 DBPASS=$(grep -oP '^PANEL_MAIL_DB_PASS=\K.*' "$ENV" 2>/dev/null)
@@ -129,6 +135,11 @@ else
 fi
 
 echo "════ Roundcube webmail (/webmail/) ════"
+# GERÇEK VPS'TE BULUNDU: php-intl olmadan Roundcube 1.7 giriş anında "Undefined constant
+# INTL_IDNA_VARIANT_UTS46" ile 500 verir (IDN alan adı dönüşümü intl eklentisini zorunlu
+# kılıyor). Bu, phpMyAdmin'in kullandığı TEMEL sistem PHP'sine ait, remi'nin per-domain
+# PHP paketlerinden BAĞIMSIZ.
+dnf install -y php-intl >/dev/null 2>&1
 RCVER=1.7.2
 mkdir -p /opt/roundcube
 if [ ! -f /opt/roundcube/index.php ]; then
