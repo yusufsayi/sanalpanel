@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # girginospanel-mail-setup — Postfix + Dovecot + OpenDKIM sanal posta kutusu altyapısını
-# kurar/onarır. Idempotent. Kurulumda çalıştırılır; panelin "E-posta" özelliği bunu gerektirir.
+# + Roundcube webmail'i kurar/onarır. Idempotent. Kurulumda çalıştırılır; panelin
+# "E-posta" özelliği bunu gerektirir.
 #
 # Postfix/Dovecot panel DB'sini (mail_domains/mailboxes/mail_aliases) CANLI MySQL sorgusuyla
 # okur — bu yüzden panelde kutu ekleme/silme/askıya-alma servis restart'sız anında etkilidir.
-# Webmail (Roundcube) BU betiğin kapsamında DEĞİL — ayrı bir aşamada eklenir.
+# Roundcube panelin mailboxes tablosuna DOKUNMAZ — Dovecot IMAP'e karşı doğrudan (SSO'suz,
+# kullanıcı kendi e-posta+parolasını girer) kimlik doğrular; kendi adres defteri/tercih
+# verisi için ayrı, küçük bir "roundcube" DB'si kullanır.
 set -uo pipefail
 log(){ printf '  %s\n' "$*"; }
 
@@ -120,4 +123,60 @@ if [ "$OK" = 1 ]; then
 else
   exit 1
 fi
-echo "════════ ✓ Mail altyapısı hazır (webmail AYRI kurulur) ════════"
+
+echo "════ Roundcube webmail (/webmail/) ════"
+RCVER=1.7.2
+mkdir -p /opt/roundcube
+if [ ! -f /opt/roundcube/index.php ]; then
+  RCTMP=$(mktemp -d)
+  if curl -fsSL -o "$RCTMP/roundcube.tar.gz" \
+       "https://github.com/roundcube/roundcubemail/releases/download/${RCVER}/roundcubemail-${RCVER}-complete.tar.gz" \
+     && tar xzf "$RCTMP/roundcube.tar.gz" -C /opt/roundcube --strip-components=1; then
+    log "roundcube ${RCVER} indirildi + açıldı"
+  else
+    log "✗ roundcube indirilemedi (ağ?) — webmail atlanıyor, Postfix/Dovecot/SMTP ETKİLENMEZ"
+  fi
+  rm -rf "$RCTMP"
+fi
+
+if [ -f /opt/roundcube/index.php ]; then
+  RCDBPASS=$(grep -oP '^PANEL_ROUNDCUBE_DB_PASS=\K.*' "$ENV" 2>/dev/null)
+  if [ -z "$RCDBPASS" ]; then
+    RCDBPASS=$(openssl rand -hex 24)
+    echo "PANEL_ROUNDCUBE_DB_PASS=${RCDBPASS}" >> "$ENV"
+  fi
+  mysql -u root <<SQL 2>/dev/null
+CREATE DATABASE IF NOT EXISTS roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'roundcube'@'localhost' IDENTIFIED BY '${RCDBPASS}';
+ALTER USER 'roundcube'@'localhost' IDENTIFIED BY '${RCDBPASS}';
+GRANT ALL PRIVILEGES ON roundcube.* TO 'roundcube'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+  # Şema yalnızca DB boşsa uygulanır (initial.sql CREATE TABLE'da IF NOT EXISTS yok — tekrar
+  # çalıştırmak hataya düşer, o yüzden idempotency'yi burada "tablo var mı" kontrolüyle sağlıyoruz).
+  RCTBL=$(mysql -u root -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='roundcube'" 2>/dev/null)
+  if [ "${RCTBL:-0}" = "0" ] && [ -f /opt/roundcube/SQL/mysql.initial.sql ]; then
+    mysql -u root roundcube < /opt/roundcube/SQL/mysql.initial.sql 2>/dev/null && log "roundcube DB şeması uygulandı"
+  fi
+
+  DESKEY=$(grep -oP '^PANEL_ROUNDCUBE_DES_KEY=\K.*' "$ENV" 2>/dev/null)
+  if [ -z "$DESKEY" ]; then
+    DESKEY=$(openssl rand -hex 16)
+    echo "PANEL_ROUNDCUBE_DES_KEY=${DESKEY}" >> "$ENV"
+  fi
+  mkdir -p /opt/roundcube/config
+  sed -e "s/DB_PASS_BURAYA/${RCDBPASS}/" -e "s/DES_KEY_BURAYA/${DESKEY}/" \
+    "$TMPL/roundcube/config.inc.php.tmpl" > /opt/roundcube/config/config.inc.php
+  chown root:apache /opt/roundcube/config/config.inc.php
+  chmod 640 /opt/roundcube/config/config.inc.php
+
+  mkdir -p /var/lib/roundcube/sessions /var/lib/roundcube/temp
+  chown -R apache:apache /opt/roundcube /var/lib/roundcube
+  restorecon -R /opt/roundcube /var/lib/roundcube >/dev/null 2>&1
+  # php-fpm pool'u (assets/php-fpm/roundcube.conf) install.sh'ın "ARTIFACT DEPLOY" adımında
+  # zaten /etc/php-fpm.d/roundcube.conf'a kopyalanmış olmalı (phpmyadmin.conf ile aynı desen).
+  systemctl reload php-fpm >/dev/null 2>&1 || systemctl restart php-fpm >/dev/null 2>&1
+  log "✓ roundcube yapılandırıldı — https://<sunucu>:8443/webmail/"
+fi
+
+echo "════════ ✓ Mail altyapısı hazır ════════"

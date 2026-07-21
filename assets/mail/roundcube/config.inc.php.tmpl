@@ -1,0 +1,28 @@
+<?php
+declare(strict_types=1);
+
+$config = [];
+
+// Roundcube'un kendi adres defteri/tercih DB'si — panelin mailboxes tablosundan AYRI
+// (Roundcube kimlik doğrulamasını doğrudan Dovecot IMAP'e karşı yapar, aşağıya bakın).
+$config['db_dsnw'] = 'mysql://roundcube:DB_PASS_BURAYA@localhost/roundcube';
+
+// IMAP/SMTP — aynı sunucuda, loopback üzerinden (dışarıdan erişilemez, şifreleme gerekmez).
+// SMTP: submission (587) — Postfix panelin ürettiği mailbox parolasıyla SASL doğrular.
+$config['default_host'] = 'localhost';
+$config['default_port'] = 143;
+$config['smtp_server']  = 'localhost';
+$config['smtp_port']    = 587;
+$config['smtp_user']    = '%u';
+$config['smtp_pass']    = '%p';
+
+$config['support_url']  = '';
+$config['product_name'] = 'GirginOSPanel Webmail';
+$config['des_key']      = 'DES_KEY_BURAYA';
+$config['plugins']      = ['archive'];
+$config['skin']         = 'elastic';
+$config['language']     = 'tr_TR';
+$config['temp_dir']     = '/var/lib/roundcube/temp';
+
+$config['session_lifetime'] = 60;
+$config['login_autocomplete'] = 0;

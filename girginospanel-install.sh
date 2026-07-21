@@ -144,7 +144,8 @@ install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-s
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
 tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
 tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
-[ -d "$A/mail" ] && cp -r "$A/mail/"* /opt/girginospanel/src/mail-templates/ && ok "mail config template'leri (postfix/dovecot/opendkim)"
+[ -d "$A/mail" ] && cp -r "$A/mail/"* /opt/girginospanel/src/mail-templates/ && ok "mail config template'leri (postfix/dovecot/opendkim/roundcube)"
+[ -f "$A/php-fpm/roundcube.conf" ] && install -m 0644 "$A/php-fpm/roundcube.conf" /etc/php-fpm.d/roundcube.conf
 # ops tool + signon
 for t in "$A"/ops/*; do
   bn=$(basename "$t"); nm="${bn%.sh}"
