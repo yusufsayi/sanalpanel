@@ -17,6 +17,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/kota"
+	"girginospanel/internal/mail"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 
@@ -274,6 +275,10 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		// Redis tenant cache: Valkey ACL user + WP drop-in + cp_domain_redis satırı.
 		// cp_domain_redis'te CASCADE FK olmadığı için domain silinince satır orphan kalıyordu.
 		redis.KapatDomain(h.DB, id, sk)
+		// Mail: mail_domains/mailboxes/mail_aliases zaten domains(id) ON DELETE CASCADE FK'li,
+		// DB satırları aşağıdaki DELETE FROM domains ile otomatik silinir. KapatDomain yine de
+		// çağrılır (redis.KapatDomain ile aynı simetri) — ileride cascade-dışı bir yan etki eklenirse.
+		mail.KapatDomain(h.DB, id, sk)
 		// NOT: /var/backups/girginospanel/<sk>/ dizini KASITLI olarak korunur.
 		// Müşteri domaini yanlışlıkla silmiş olabilir → yedekler kurtarma için saklanır.
 		// (Manuel temizlik için backups.RemoveDomainBackups mevcut.)

@@ -77,6 +77,22 @@ func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida boo
 		log.Printf("askiToggle: ftp_accounts status güncelleme (domain %d): %v", id, e)
 	}
 
+	// Mail: Postfix/Dovecot SQL sorguları durum/status='active' filtreler, bu yüzden bu iki
+	// UPDATE servis restart'sız anında hem gelen postayı reddeder hem SMTP AUTH'u keser.
+	// Kutular SİLİNMEZ — askıdan alınca aynı UPDATE ile 'active'e döner.
+	mailStatus := "active"
+	if askida {
+		mailStatus = "suspended"
+	}
+	if _, e := h.DB.ExecContext(r.Context(),
+		`UPDATE mail_domains SET durum=? WHERE domain_id=?`, mailStatus, id); e != nil {
+		log.Printf("askiToggle: mail_domains durum güncelleme (domain %d): %v", id, e)
+	}
+	if _, e := h.DB.ExecContext(r.Context(),
+		`UPDATE mailboxes SET status=? WHERE domain_id=?`, mailStatus, id); e != nil {
+		log.Printf("askiToggle: mailboxes status güncelleme (domain %d): %v", id, e)
+	}
+
 	// Çalışan tenant süreçlerini (php-fpm worker) durdur + crontab'ı devre dışı bırak /
 	// geri getir. Best-effort (birincil askı durumu DB + 503 vhost ile zaten uygulandı).
 	if sk != "" {

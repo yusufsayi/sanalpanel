@@ -167,8 +167,8 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ftp_accounts WHERE domain_id=?`, id).Scan(&o.FTPSayisi.Kullanim)
 	o.FTPSayisi.Limit = maxFTP
 
-	// E-posta (modül yok şu an — 0)
-	o.EpostaSayi.Kullanim = 0
+	// E-posta kutusu sayısı
+	_ = h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailboxes WHERE domain_id=?`, id).Scan(&o.EpostaSayi.Kullanim)
 	o.EpostaSayi.Limit = maxEmail
 
 	// Domain sayısı: bu zaten 1 — ama abonelik kapsamında subdomain'leri saymak gerek

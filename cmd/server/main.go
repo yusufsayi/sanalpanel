@@ -33,6 +33,7 @@ import (
 	"girginospanel/internal/kaynak"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/logs"
+	"girginospanel/internal/mail"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/monitor"
 	"girginospanel/internal/musteri"
@@ -117,6 +118,10 @@ func main() {
 	// efektif kotayı (domain override > plan > varsayılan) idempotent uygula; noquota ise
 	// (tek seferlik reboot bekliyor) sessizce atla. Boot'u bloklamaz (bg goroutine).
 	go kaynaklimit.HealKotaOnStartup(context.Background(), d)
+	// Mail: Postfix/Dovecot config dosyalarının varlığını doğrula + aktif mail_domains'lerin
+	// maildir kök dizinini onar. Eksikse yalnız uyarı loglar (girginospanel-mail-setup henüz
+	// çalıştırılmamış olabilir), fatal değildir.
+	mail.HealMailOnStartup(context.Background(), d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
@@ -151,7 +156,9 @@ func main() {
 	wafH := &waf.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
+	mailH := &mail.Handlers{DB: d}
 	sshaccess.EnsureInfra()
+	mail.EnsureInfra()
 	phpExtH := &phpext.Handlers{DB: d}
 	paketlerH := &paketler.Handlers{DB: d}
 	phpSurumH := &phpsurum.Handlers{DB: d}
@@ -225,6 +232,14 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/redis", redisH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/redis", redisH.Ac)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/redis", redisH.Kapat)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/mail/durum", mailH.MailDurum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/mail/etkinlestir", mailH.Etkinlestir)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/mail/etkinlestir", mailH.Devredisi)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/mail", mailH.Liste)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/mail", mailH.Ekle)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/mail/{mid}", mailH.Sil)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/mail/{mid}/parola", mailH.ParolaSifirla)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/mail/{mid}/durum", mailH.DurumDegistir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/koruma", korumaH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/koruma", korumaH.Ekle)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/koruma/{kid}", korumaH.Sil)

@@ -68,3 +68,32 @@ func CheckDBEklenebilir(ctx context.Context, db *sql.DB, domainID int64) error {
 	}
 	return nil
 }
+
+// CheckMailboxEklenebilir: domain'in customer plan.max_email limitini kontrol eder.
+func CheckMailboxEklenebilir(ctx context.Context, db *sql.DB, domainID int64) error {
+	var customerID *int64
+	if err := db.QueryRowContext(ctx, `SELECT customer_id FROM domains WHERE id=?`, domainID).Scan(&customerID); err != nil {
+		return nil
+	}
+	if customerID == nil {
+		return nil
+	}
+	var planID *int64
+	_ = db.QueryRowContext(ctx, `SELECT plan_id FROM customers WHERE id=?`, *customerID).Scan(&planID)
+	if planID == nil {
+		return nil
+	}
+	var maks int
+	_ = db.QueryRowContext(ctx, `SELECT max_email FROM service_plans WHERE id=?`, *planID).Scan(&maks)
+	if maks <= 0 {
+		return nil
+	}
+	var mevcut int
+	_ = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM mailboxes m JOIN domains d ON d.id=m.domain_id WHERE d.customer_id=?`,
+		*customerID).Scan(&mevcut)
+	if mevcut >= maks {
+		return &LimitHatasi{Mesaj: fmt.Sprintf("plan limiti aşıldı: max %d e-posta kutusu", maks)}
+	}
+	return nil
+}
