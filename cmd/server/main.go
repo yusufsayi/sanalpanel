@@ -375,6 +375,10 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/kaynak", kaynakH.Goster)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/nginx-settings", nginxsetH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/nginx-settings", nginxsetH.Kaydet)
+				// Özel vhost modu: paylaşımlı nginx'te server_name/listen gibi tenant-izolasyonunu
+				// etkileyebilecek tam kontrol veriyor — MusteriScope DEĞİL, yalnızca admin.
+				r.With(middleware.AdminOnly).Get("/domains/{id}/vhost-ozel", nginxsetH.GetVhostOzel)
+				r.With(middleware.AdminOnly).Put("/domains/{id}/vhost-ozel", nginxsetH.SetVhostOzel)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/waf", wafH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/waf", wafH.Kaydet)
 				r.With(middleware.AdminOnly).Get("/php-extensions", phpExtH.List)

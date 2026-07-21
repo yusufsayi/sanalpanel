@@ -683,24 +683,46 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		}
 	}
 
-	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
-	opts.SecHeaders = buildSecurityHeaders(opts)
-	opts.DenyBlocks = denyBlocksNginx
-	// WAF (ModSecurity) direktifi: her render'da efektif ayardan hesapla. Askidayken
-	// suspend vhost'u (ModSec alani yok) render edilir → hesaplama gereksiz.
-	// buildModSec, WAF pasif/modul yoksa "" doner (vhost'u bozmaz) ve aktifse per-domain
-	// modsec conf dosyasini da tazeler → tek kaynak: her render self-healing.
-	if !opts.Askida {
-		opts.ModSec = buildModSec(sk)
+	// Özel vhost modu: askıda DEĞİLSE (yukarıdaki blok Askida'yı DB'den zorlar, bu yüzden
+	// bir domain HEM askıda HEM özel-vhost olsa bile askı her zaman kazanır — 503 asla
+	// bypass edilemez) ve domain'in vhost_ozel=1 ise, şablonu HİÇ render etmeden admin'in
+	// panelden kaydettiği ham dosya içeriğini birebir kullan. renderAndReload TÜM vhost
+	// yazımlarının tek çıkış noktası olduğu için (bkz. yukarıdaki per-tenant FPM yorumu)
+	// bu kontrol burada olunca ~28 farklı çağrı noktasının (SSL yenileme, PHP sürüm
+	// değişimi, plan/WAF değişimi, boot-time heal'lar...) HİÇBİRİ ayrıca değiştirilmeden
+	// admin'in özel vhost'unu otomatik olarak korur.
+	ozelIcerik := ""
+	if !opts.Askida && pkgDB != nil {
+		var ozel int
+		var icerik sql.NullString
+		_ = pkgDB.QueryRow(`SELECT COALESCE(vhost_ozel,0), vhost_ozel_icerik FROM domains WHERE sistem_kullanici=?`, sk).
+			Scan(&ozel, &icerik)
+		if ozel == 1 && icerik.Valid && strings.TrimSpace(icerik.String) != "" {
+			ozelIcerik = icerik.String
+		}
 	}
 
 	var buf bytes.Buffer
-	tmpl := vhostTmpl
-	if opts.Askida {
-		tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
-	}
-	if err := tmpl.Execute(&buf, opts); err != nil {
-		return fmt.Errorf("template render: %w", err)
+	if ozelIcerik != "" {
+		buf.WriteString(ozelIcerik)
+	} else {
+		// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
+		opts.SecHeaders = buildSecurityHeaders(opts)
+		opts.DenyBlocks = denyBlocksNginx
+		// WAF (ModSecurity) direktifi: her render'da efektif ayardan hesapla. Askidayken
+		// suspend vhost'u (ModSec alani yok) render edilir → hesaplama gereksiz.
+		// buildModSec, WAF pasif/modul yoksa "" doner (vhost'u bozmaz) ve aktifse per-domain
+		// modsec conf dosyasini da tazeler → tek kaynak: her render self-healing.
+		if !opts.Askida {
+			opts.ModSec = buildModSec(sk)
+		}
+		tmpl := vhostTmpl
+		if opts.Askida {
+			tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
+		}
+		if err := tmpl.Execute(&buf, opts); err != nil {
+			return fmt.Errorf("template render: %w", err)
+		}
 	}
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	// Fail-safe: bozuk config diske kalirsa sonraki nginx -t/reload TUM nginx'i dusurur.

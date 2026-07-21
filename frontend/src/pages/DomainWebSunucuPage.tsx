@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import KodEditor from '@/components/KodEditor'
 
 type Ayarlar = {
   hdr_x_content_type: boolean
@@ -23,6 +24,7 @@ type Ayarlar = {
 }
 
 type Yanit = { alan_adi: string; ayarlar: Ayarlar }
+type VhostOzelYanit = { ozel: boolean; icerik: string; alan_adi: string }
 
 const BACKEND_BILGI: Record<string, { ad: string; ikon: string; aciklama: string; renk: string }> = {
   'php-fpm': {
@@ -70,6 +72,15 @@ export default function DomainWebSunucuPage() {
   const [backend, setBackend] = useState<string>('php-fpm')
   const [backendDegistiriliyor, setBackendDegistiriliyor] = useState(false)
 
+  // Özel (ham) vhost modu — yalnızca admin (backend AdminOnly ile korur). Musteri-scope
+  // bir oturumda 403 dönerse sessizce yok say — kartı hiç göstermeyiz, sayfanın geri
+  // kalanı etkilenmez (bu yüzden ayrı bir istek, ana Promise.all'ın dışında).
+  const [vhostOzel, setVhostOzel] = useState<VhostOzelYanit | null>(null)
+  const [vhostOzelDuzenleAcik, setVhostOzelDuzenleAcik] = useState(false)
+  const [vhostOzelIcerikDuzenle, setVhostOzelIcerikDuzenle] = useState('')
+  const [vhostOzelHata, setVhostOzelHata] = useState<string | null>(null)
+  const [vhostOzelIsleniyor, setVhostOzelIsleniyor] = useState(false)
+
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
@@ -81,8 +92,41 @@ export default function DomainWebSunucuPage() {
       setBackend(b.data.backend)
     }).catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
+    api.get<VhostOzelYanit>(`/domains/${id}/vhost-ozel`).then(v => setVhostOzel(v.data)).catch(() => {})
   }
   useEffect(yukle, [id])
+
+  function vhostOzelDuzenleAc() {
+    if (!vhostOzel) return
+    setVhostOzelIcerikDuzenle(vhostOzel.icerik)
+    setVhostOzelHata(null)
+    setVhostOzelDuzenleAcik(true)
+  }
+
+  async function vhostOzelKaydet() {
+    setVhostOzelHata(null)
+    try {
+      await api.put(`/domains/${id}/vhost-ozel`, { ozel: true, icerik: vhostOzelIcerikDuzenle })
+      setVhostOzel(v => v ? { ...v, ozel: true, icerik: vhostOzelIcerikDuzenle } : v)
+    } catch (e) {
+      setVhostOzelHata(apiHata(e, 'Kaydetme başarısız'))
+      throw e // KodEditor "kirli" durumda kalsın, editör kapanmasın — admin düzeltip tekrar deneyebilsin
+    }
+  }
+
+  async function vhostOzelKapat() {
+    if (!confirm('Özel vhost modunu kapatıp panelin standart yönetimine dönmek istiyor musun?\n\nKaydettiğin içerik SİLİNMEZ — tekrar açarsan kaldığın yerden devam edersin.')) return
+    setVhostOzelIsleniyor(true)
+    try {
+      await api.put(`/domains/${id}/vhost-ozel`, { ozel: false, icerik: vhostOzel?.icerik || '' })
+      setVhostOzel(v => v ? { ...v, ozel: false } : v)
+      setBasari('✓ Panel yönetimine geri dönüldü, vhost yeniden oluşturuldu')
+    } catch (e) {
+      setHata(apiHata(e, 'Kapatma başarısız'))
+    } finally {
+      setVhostOzelIsleniyor(false)
+    }
+  }
 
   async function backendKaydet(yeni: string) {
     if (yeni === backend || backendDegistiriliyor) return
@@ -283,6 +327,41 @@ export default function DomainWebSunucuPage() {
             </div>
           </Kart>
 
+          {/* Özel (ham) vhost modu — yalnızca admin */}
+          {vhostOzel && (
+            <Kart baslik="Özel Vhost Modu (Gelişmiş)">
+              <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
+                Bu modu açtığında <strong>tüm</strong> vhost dosyası (HTTP→HTTPS yönlendirmesi ve Let's Encrypt doğrulama konumu dahil) senin sorumluluğuna geçer —
+                yukarıdaki header/cache/ek-direktif ayarları ve panel bu dosyaya bir daha dokunmaz.{' '}
+                <code className="font-mono">/.well-known/acme-challenge/</code> bloğunu kaldırırsan sertifika 90 gün sonra otomatik yenilenemez.
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {vhostOzel.ozel ? '🟢 Özel vhost aktif' : '⚪ Kapalı — panel yönetiyor'}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
+                    {vhostOzel.ozel
+                      ? 'nginx bu domain için yukarıdaki ayarları DEĞİL, kaydettiğin ham dosyayı kullanıyor.'
+                      : 'Kaydedersen mevcut çalışan vhost dosyasından başlayarak düzenleyebilirsin.'}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={vhostOzelDuzenleAc}
+                    className="px-4 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+                    {vhostOzel.ozel ? 'Düzenle' : 'Aç ve Düzenle'}
+                  </button>
+                  {vhostOzel.ozel && (
+                    <button onClick={vhostOzelKapat} disabled={vhostOzelIsleniyor}
+                      className="px-4 py-2 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 text-sm rounded-md">
+                      {vhostOzelIsleniyor ? 'Kapatılıyor…' : 'Kapat'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Kart>
+          )}
+
           {/* Ek direktifler */}
           <Kart baslik="Ek nginx Direktifleri">
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">
@@ -304,6 +383,23 @@ export default function DomainWebSunucuPage() {
               Yeniden Yükle
             </button>
           </div>
+        </>
+      )}
+
+      {vhostOzelDuzenleAcik && vhostOzel && (
+        <>
+          {vhostOzelHata && (
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] max-w-xl px-4 py-3 bg-red-600 text-white text-xs font-mono rounded-lg shadow-2xl whitespace-pre-wrap">
+              {vhostOzelHata}
+            </div>
+          )}
+          <KodEditor
+            yol={`dom_${vhostOzel.alan_adi}.conf`}
+            icerik={vhostOzelIcerikDuzenle}
+            onChange={setVhostOzelIcerikDuzenle}
+            onKaydet={vhostOzelKaydet}
+            onKapat={() => setVhostOzelDuzenleAcik(false)}
+          />
         </>
       )}
     </div>

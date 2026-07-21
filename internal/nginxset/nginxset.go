@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 
 	"girginospanel/internal/httpx"
@@ -171,6 +172,103 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, php); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost: "+err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---- Özel (ham) vhost modu — yalnızca admin. Bkz. internal/provisioner/provisioner.go
+// renderAndReload: vhost_ozel=1 iken şablon hiç çalışmaz, aşağıdaki icerik birebir yazılır.
+
+type vhostOzelResp struct {
+	Ozel    bool   `json:"ozel"`
+	Icerik  string `json:"icerik"`
+	AlanAdi string `json:"alan_adi"`
+}
+
+// GET /domains/{id}/vhost-ozel — ozel=false ise icerik, panelin O AN gerçekten sunduğu
+// dosyanın (disk üzerindeki) içeriğidir — admin çalışan bir kopyadan başlar (ACME
+// doğrulama bloğu, redirect vb. zaten hazır), boş bir kutudan değil.
+func (h *Handlers) GetVhostOzel(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var alanAdi, sk string
+	var ozel int
+	var icerikDB sql.NullString
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT alan_adi, sistem_kullanici, COALESCE(vhost_ozel,0), vhost_ozel_icerik FROM domains WHERE id=?`, id).
+		Scan(&alanAdi, &sk, &ozel, &icerikDB); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	resp := vhostOzelResp{Ozel: ozel == 1, AlanAdi: alanAdi}
+	if resp.Ozel && icerikDB.Valid {
+		resp.Icerik = icerikDB.String
+	} else {
+		body, err := os.ReadFile("/etc/nginx/conf.d/dom_" + sk + ".conf")
+		if err == nil {
+			resp.Icerik = string(body)
+		} else if icerikDB.Valid {
+			resp.Icerik = icerikDB.String // daha önce kaydedilmiş ama şu an kapalı — onu göster
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+type setVhostOzelReq struct {
+	Ozel   bool   `json:"ozel"`
+	Icerik string `json:"icerik"`
+}
+
+// PUT /domains/{id}/vhost-ozel — açarken nginx -t doğrulanır; render/nginx -t başarısız
+// olursa DB eski haline geri alınır (sifrekoruma.Ekle ile aynı ekle-render-başarısız-geri-al
+// deseni) — canlı dosyaya da hiç dokunulmamış olur (renderAndReload kendi backup/rollback'ini
+// zaten yapıyor). Kapatırken icerik SİLİNMEZ — tekrar açılırsa kaldığı yerden devam edilir.
+func (h *Handlers) SetVhostOzel(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var req setVhostOzelReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+		return
+	}
+	var php, sk string
+	var oldOzel int
+	var oldIcerik sql.NullString
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT php_surum, sistem_kullanici, COALESCE(vhost_ozel,0), vhost_ozel_icerik FROM domains WHERE id=?`, id).
+		Scan(&php, &sk, &oldOzel, &oldIcerik); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+
+	if req.Ozel {
+		if err := provisioner.ValidateRawVhost(req.Icerik); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz nginx yapılandırması: "+err.Error())
+			return
+		}
+	}
+
+	newOzel := 0
+	if req.Ozel {
+		newOzel = 1
+	}
+	if _, err := h.DB.ExecContext(r.Context(),
+		`UPDATE domains SET vhost_ozel=?, vhost_ozel_icerik=? WHERE id=?`, newOzel, req.Icerik, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "kaydet: "+err.Error())
+		return
+	}
+
+	var applyErr error
+	if socket, err := provisioner.PHPSocketFor(sk, php); err != nil {
+		applyErr = err
+	} else {
+		applyErr = provisioner.ApplyVhostForDomain(h.DB, id, socket, php)
+	}
+	if applyErr != nil {
+		// geri al — canlı dosya renderAndReload'un kendi backup/rollback'i sayesinde
+		// zaten bozulmadı, ama DB'yi de tutarsız bırakmayalım.
+		_, _ = h.DB.ExecContext(r.Context(),
+			`UPDATE domains SET vhost_ozel=?, vhost_ozel_icerik=? WHERE id=?`, oldOzel, oldIcerik, id)
+		httpx.WriteError(w, http.StatusInternalServerError, "vhost uygulanamadı: "+applyErr.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

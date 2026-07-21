@@ -69,6 +69,51 @@ server {
 	return nil
 }
 
+// ValidateRawVhost, ÖZEL VHOST MODU için tam bir dosya gövdesini doğrular.
+// ValidateNginxDirectives'ten farkı: içeriği sentetik bir server{} bloğuna GÖMMEZ —
+// admin'in kaydettiği metin zaten kendi server{} (veya birden çok server{}, ör. 80→443
+// yönlendirmesi) bloklarını içerir, tekrar sarmalamak "brace mismatch" ile her zaman
+// patlar. Bu yüzden TehlikeliNginxDirektifi denylist'i de burada UYGULANMAZ — özel vhost
+// modu kasıtlı olarak tam-güven admin özelliğidir (root/fastcgi_pass/ssl_certificate gibi
+// direktifler gerçek bir vhost'ta ZORUNLUDUR); tek güvenlik kapısı `nginx -t`'dir.
+func ValidateRawVhost(content string) error {
+	c := strings.TrimSpace(content)
+	if c == "" {
+		return fmt.Errorf("vhost içeriği boş olamaz")
+	}
+
+	tmp, err := os.CreateTemp("/etc/nginx/conf.d", "_vhostozel_validate_*.conf.tmp")
+	if err != nil {
+		return fmt.Errorf("geçici doğrulama dosyası oluşturulamadı: %w", err)
+	}
+	tmpPath := tmp.Name()
+	finalPath := strings.TrimSuffix(tmpPath, ".tmp")
+
+	if _, err := tmp.WriteString(c + "\n"); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("geçici doğrulama dosyası yazılamadı: %w", err)
+	}
+	tmp.Close()
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("geçici doğrulama dosyası hazırlanamadı: %w", err)
+	}
+	defer os.Remove(finalPath)
+
+	out, err := exec.Command("nginx", "-t").CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		msg = strings.ReplaceAll(msg, finalPath, "(özel vhost)")
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
 var nginxYasakDirektif = map[string]bool{
 	"alias": true, "root": true,
 	"proxy_pass": true, "fastcgi_pass": true, "uwsgi_pass": true, "scgi_pass": true,
