@@ -80,7 +80,7 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !rootParolaDogrula(b.Mevcut) {
-		writeAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.parola", "root", false)
+		WriteAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.parola", "root", false)
 		httpx.WriteError(w, http.StatusUnauthorized, "mevcut parola hatalı")
 		return
 	}
@@ -90,7 +90,7 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "parola değiştirilemedi: "+strings.TrimSpace(string(out)))
 		return
 	}
-	writeAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.parola", "root", true)
+	WriteAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.parola", "root", true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -135,7 +135,7 @@ func (h *Handlers) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi")
 		return
 	}
-	writeAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.2fa.enable", "root", true)
+	WriteAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.2fa.enable", "root", true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -160,6 +160,6 @@ func (h *Handlers) TwoFADisable(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "kapatılamadı")
 		return
 	}
-	writeAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.2fa.disable", "root", true)
+	WriteAudit(h.DB, c.UserID, "root", httpx.ClientIP(r), "auth.2fa.disable", "root", true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

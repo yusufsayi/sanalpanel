@@ -225,7 +225,7 @@ Güncelleme, **migration'ları uygulamadan önce** panel DB'sinin tam dump'ını
 Panelinizi, güncelleme aracı dağıtıma eklenmeden **önce** kurmuşsanız bu komut sunucunuzda bulunmaz. Aracı almanın tek yolu yine kendisi olduğu için kısır döngüye girersiniz. Tek seferlik şu komutla kurun:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/girginos/gpanel/main/assets/ops/girginospanel-update \
+curl -fsSL https://raw.githubusercontent.com/yusufsayi/gpanel/main/assets/ops/girginospanel-update \
   -o /usr/local/bin/girginospanel-update && chmod +x /usr/local/bin/girginospanel-update
 
 girginospanel-update

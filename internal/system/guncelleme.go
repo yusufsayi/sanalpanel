@@ -27,7 +27,7 @@ import (
 
 const (
 	guncelleScript = "/usr/local/bin/girginospanel-update"
-	guncelleRawURL = "https://raw.githubusercontent.com/girginos/gpanel/main/assets/ops/girginospanel-update"
+	guncelleRawURL = "https://raw.githubusercontent.com/yusufsayi/gpanel/main/assets/ops/girginospanel-update"
 	guncelleLogYol = "/opt/girginospanel/logs/guncelleme.log"
 	guncelleUnit   = "girginospanel-guncelleme"
 )

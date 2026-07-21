@@ -17,7 +17,7 @@
 #  • Günlük 03:30 yedek timer'ı (girginospanel-db-backup.timer) kurulur + enable edilir.
 set -euo pipefail
 
-REPO="${GOSP_REPO:-girginos/gpanel}"
+REPO="${GOSP_REPO:-yusufsayi/gpanel}"
 BRANCH="main"; DRY=0; FORCE=0
 PREFIX=/opt/girginospanel
 BIN="$PREFIX/bin/girginospanel-server"

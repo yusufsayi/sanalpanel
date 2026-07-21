@@ -78,13 +78,21 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "kullanıcı adı ve parola zorunlu")
 		return
 	}
+
+	ip := httpx.ClientIP(r)
+	if TooManyFailedAttempts(r.Context(), h.DB, "auth.login", ip) {
+		httpx.WriteError(w, http.StatusTooManyRequests,
+			"çok fazla başarısız deneme — 15 dakika sonra tekrar deneyin")
+		return
+	}
+
 	if req.Kullanici != "root" {
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		WriteAudit(h.DB, 0, req.Kullanici, ip, "auth.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "yalnızca sunucu root kullanıcısı admin paneline giriş yapabilir")
 		return
 	}
 	if !rootParolaDogrula(req.Parola) {
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		WriteAudit(h.DB, 0, req.Kullanici, ip, "auth.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
@@ -99,8 +107,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 				httpx.WriteJSON(w, http.StatusOK, map[string]any{"iki_fa_gerekli": true})
 				return
 			}
+			// GÜVENLİK: TOTP kodu 6 hane (1e6 olasılık) — parola engeli aşıldıktan
+			// sonra kod brute-force'a karşı da aynı pencereli kilit uygulanır.
+			if TooManyFailedAttempts(r.Context(), h.DB, "auth.2fa", ip) {
+				httpx.WriteError(w, http.StatusTooManyRequests,
+					"çok fazla başarısız 2FA denemesi — 15 dakika sonra tekrar deneyin")
+				return
+			}
 			if !TOTPVerify(sec, req.Kod) {
-				writeAudit(h.DB, 1, "root", httpx.ClientIP(r), "auth.2fa", "root", false)
+				WriteAudit(h.DB, 1, "root", ip, "auth.2fa", "root", false)
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı")
 				return
 			}
@@ -113,7 +128,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
 	}
-	writeAudit(h.DB, adminUID, "root", httpx.ClientIP(r), "auth.login", "root", true)
+	WriteAudit(h.DB, adminUID, "root", ip, "auth.login", "root", true)
 
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = adminUID
@@ -125,7 +140,10 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-func writeAudit(db *sql.DB, uid int64, username, ip, action, target string, ok bool) {
+// WriteAudit: audit_log'a bir girişim kaydeder (login/2FA/parola vb.). Diğer
+// paketler (ör. musteri) de kendi login denemelerini burada loglar — böylece
+// TooManyFailedAttempts tüm login yüzeylerinde aynı tabloyu kullanabilir.
+func WriteAudit(db *sql.DB, uid int64, username, ip, action, target string, ok bool) {
 	var uidVal any
 	if uid > 0 {
 		uidVal = uid

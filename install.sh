@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # GirginOSPanel — tek satır kurulum (bootstrap)
-#   curl -fsSL https://raw.githubusercontent.com/girginos/gpanel/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/yusufsayi/gpanel/main/install.sh | bash
 #
 # Bu bootstrap deponun tamamını (installer + prebuilt binary + config'ler) indirir
 # ve girginospanel-install.sh'yi çalıştırır.
 set -euo pipefail
 
-REPO="girginos/gpanel"
+REPO="yusufsayi/gpanel"
 BRANCH="main"
 
 c_b="\033[1;34m"; c_g="\033[32m"; c_r="\033[31m"; c_0="\033[0m"

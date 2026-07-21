@@ -3,6 +3,7 @@
 package musteri
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GÜVENLİK: bu uç noktanın hiç deneme sınırı yoktu (bkz. auth.TooManyFailedAttempts
+	// yorumu) — aynı IP-pencereli kilit burada da uygulanır.
+	ip := httpx.ClientIP(r)
+	if auth.TooManyFailedAttempts(r.Context(), h.DB, "musteri.login", ip) {
+		httpx.WriteError(w, http.StatusTooManyRequests,
+			"çok fazla başarısız deneme — 15 dakika sonra tekrar deneyin")
+		return
+	}
+
 	// ftp_accounts'tan kontrol
 	var ftpID, domainID int64
 	var passDB, alanAdi, status string
@@ -48,6 +58,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		 WHERE fa.username = ?`, req.Kullanici).
 		Scan(&ftpID, &domainID, &passDB, &status, &alanAdi)
 	if errors.Is(err, sql.ErrNoRows) {
+		auth.WriteAudit(h.DB, 0, req.Kullanici, ip, "musteri.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}
@@ -59,11 +70,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "FTP hesabı askıya alınmış")
 		return
 	}
-	// Plain text karşılaştırma (Pure-FTPd MYSQLCrypt cleartext)
-	if req.Parola != passDB {
+	// Plain text karşılaştırma (Pure-FTPd MYSQLCrypt cleartext); sabit-zamanlı
+	// (timing side-channel'a karşı — uzunluk farklıysa doğrudan false, aksi halde
+	// subtle.ConstantTimeCompare).
+	if len(req.Parola) != len(passDB) || subtle.ConstantTimeCompare([]byte(req.Parola), []byte(passDB)) != 1 {
+		auth.WriteAudit(h.DB, 0, req.Kullanici, ip, "musteri.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}
+	auth.WriteAudit(h.DB, 0, req.Kullanici, ip, "musteri.login", req.Kullanici, true)
 
 	// JWT üret — tip="musteri", domain_id scope
 	c := auth.MusteriClaims{
