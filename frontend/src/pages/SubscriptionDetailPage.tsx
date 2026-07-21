@@ -325,9 +325,9 @@ function DashboardTabIcerik({ domain }: { domain: Domain }) {
 function HostingTab({ domain }: { domain: Domain }) {
   return (
     <Grup baslik="Barınma Hizmetleri">
-      <ToolCard etiket="Barındırma Ayarları" aciklama="Document root, options" ikon={ICONS.hizmet} renk="indigo" />
+      <ToolCard etiket="Barındırma Ayarları" aciklama="Document root, options" ikon={ICONS.hizmet} renk="indigo" to={`/abonelikler/${domain.id}/web-sunucu`} />
       <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
-      <ToolCard etiket="DNS Ayarları"        aciklama="A, CNAME, MX"            ikon={ICONS.dns}    renk="emerald" />
+      <ToolCard etiket="DNS Ayarları"        aciklama="A, CNAME, MX"            ikon={ICONS.dns}    renk="emerald" to={`/abonelikler/${domain.id}/dns`} />
     </Grup>
   )
 }
