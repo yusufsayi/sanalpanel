@@ -5,6 +5,8 @@ import { Link } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
 import PanelGuncelleme from '@/components/PanelGuncelleme'
 import SunucuOptimize from '@/components/SunucuOptimize'
+import PanelDomain from '@/components/PanelDomain'
+import SunucuYenidenBaslat from '@/components/SunucuYenidenBaslat'
 
 /*
  * Araçlar ve Ayarlar — sunucu geneli yönetim merkezi.
@@ -173,19 +175,22 @@ export default function AraclarAyarlarPage() {
             Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım.
           </p>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Ikon d={I.search}
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="search"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Araç ara…"
-            aria-label="Araç ara"
-            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900
-                       placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
-                       dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-          />
+        <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center">
+          <SunucuYenidenBaslat />
+          <div className="relative w-full sm:w-72">
+            <Ikon d={I.search}
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Araç ara…"
+              aria-label="Araç ara"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900
+                         placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
+                         dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
+            />
+          </div>
         </div>
       </div>
 
@@ -199,6 +204,7 @@ export default function AraclarAyarlarPage() {
         </div>
         <div className="space-y-3">
           <PanelGuncelleme />
+          <PanelDomain />
           <SunucuOptimize />
         </div>
       </section>

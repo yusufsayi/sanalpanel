@@ -39,6 +39,7 @@ import (
 	"sanalpanel/internal/musteri"
 	"sanalpanel/internal/nginxset"
 	"sanalpanel/internal/paketler"
+	"sanalpanel/internal/panelayarlari"
 	"sanalpanel/internal/performans"
 	"sanalpanel/internal/php"
 	"sanalpanel/internal/phpext"
@@ -155,6 +156,7 @@ func main() {
 	eklentiH := &eklenti.Handlers{DB: d}
 	go eklentiH.SaglikDongusu(context.Background())
 	nginxsetH := &nginxset.Handlers{DB: d}
+	panelAyarH := &panelayarlari.Handlers{DB: d}
 	sshH := &sshaccess.Handlers{DB: d, IPv4: ipv4}
 	statH := &istatistik.Handlers{DB: d}
 	perfH := &performans.Handlers{DB: d}
@@ -234,6 +236,10 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/cve/log", system.CveLog)
 			r.With(middleware.AdminOnly).Get("/system/kernelcare", system.KernelcareDurumHandler)
 			r.With(middleware.AdminOnly).Post("/system/kernelcare/yamala", system.KernelcareYamala)
+			r.With(middleware.AdminOnly).Post("/system/reboot", system.Reboot)
+			r.With(middleware.AdminOnly).Get("/system/panel-domain", panelAyarH.Durum)
+			r.With(middleware.AdminOnly).Post("/system/panel-domain", panelAyarH.Kaydet)
+			r.With(middleware.AdminOnly).Delete("/system/panel-domain", panelAyarH.Kaldir)
 			eklentiH.Routes(r)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
