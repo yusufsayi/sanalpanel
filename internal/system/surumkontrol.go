@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	surumUCVarsayilan = "https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/surum.json"
+	surumUCVarsayilan = "https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/surum.json"
 	surumKimlikYol    = "/etc/sanalpanel/kurulum-kimlik"
 	surumOnbellekYol  = "/opt/sanalpanel/surum-onbellek.json"
 	surumPeriyot      = 24 * time.Hour

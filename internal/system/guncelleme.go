@@ -27,7 +27,7 @@ import (
 
 const (
 	guncelleScript = "/usr/local/bin/sanalpanel-update"
-	guncelleRawURL = "https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/assets/ops/sanalpanel-update"
+	guncelleRawURL = "https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/assets/ops/sanalpanel-update"
 	guncelleLogYol = "/opt/sanalpanel/logs/guncelleme.log"
 	guncelleUnit   = "sanalpanel-guncelleme"
 )

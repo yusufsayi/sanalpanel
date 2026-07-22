@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SanalPanel — tek satır kurulum (bootstrap)
-#   curl -fsSL https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/install.sh | bash
 #
 # Bu bootstrap deponun tamamını (installer + prebuilt binary + config'ler) indirir
 # ve sanalpanel-install.sh'yi çalıştırır.
 set -euo pipefail
 
-REPO="yusufsayi/sanalpanel"
+REPO="sanalpanel/sanalpanel"
 BRANCH="main"
 
 c_b="\033[1;34m"; c_g="\033[32m"; c_r="\033[31m"; c_0="\033[0m"

@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/yusufsayi/sanalpanel"><b>🌐 GitHub</b></a> &nbsp;·&nbsp;
+  <a href="https://github.com/sanalpanel/sanalpanel"><b>🌐 GitHub</b></a> &nbsp;·&nbsp;
   <a href="README.md">Türkçe</a> &nbsp;·&nbsp;
   <a href="README.en.md">English</a>
 </p>
@@ -13,7 +13,7 @@ Turns a blank **AlmaLinux 10** server into a complete hosting control panel with
 On a clean AlmaLinux 10 server (min. 2 GB RAM), as **root**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/install.sh | bash
 ```
 
 Installation takes ~5-10 minutes (package downloads). When it finishes, the panel URL and login credentials are printed to the screen.
@@ -249,7 +249,7 @@ Before applying migrations, the update takes a full dump of the panel DB into `/
 If you installed your panel before the update tool was added to the distribution, the command won't exist on your server yet. Since the only way to get the tool is the tool itself, this is a one-time chicken-and-egg problem — fix it with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/assets/ops/sanalpanel-update \
+curl -fsSL https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/assets/ops/sanalpanel-update \
   -o /usr/local/bin/sanalpanel-update && chmod +x /usr/local/bin/sanalpanel-update
 
 sanalpanel-update

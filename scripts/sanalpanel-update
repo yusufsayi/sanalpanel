@@ -17,7 +17,7 @@
 #  • Günlük 03:30 yedek timer'ı (sanalpanel-db-backup.timer) kurulur + enable edilir.
 set -euo pipefail
 
-REPO="${SANAL_REPO:-yusufsayi/sanalpanel}"
+REPO="${SANAL_REPO:-sanalpanel/sanalpanel}"
 BRANCH="main"; DRY=0; FORCE=0
 PREFIX=/opt/sanalpanel
 BIN="$PREFIX/bin/sanalpanel-server"

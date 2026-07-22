@@ -26,7 +26,7 @@
 # başlarsa eski binary + güncelleme-öncesi DB'ye rollback yapılır.
 set -euo pipefail
 
-REPO="${SANAL_REPO:-yusufsayi/sanalpanel}"
+REPO="${SANAL_REPO:-sanalpanel/sanalpanel}"
 BRANCH="main"; DRY=0; DODB=1; DORESTART=1
 
 # Yollar env ile override edilebilir (izole test için). Üretimde varsayılanlar geçerli.

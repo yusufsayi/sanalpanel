@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/yusufsayi/sanalpanel"><b>🌐 GitHub</b></a> &nbsp;·&nbsp;
+  <a href="https://github.com/sanalpanel/sanalpanel"><b>🌐 GitHub</b></a> &nbsp;·&nbsp;
   <a href="README.md">Türkçe</a> &nbsp;·&nbsp;
   <a href="README.en.md">English</a>
 </p>
@@ -13,7 +13,7 @@ Boş bir **AlmaLinux 10** sunucuyu tek komutla komple bir hosting kontrol paneli
 Temiz bir AlmaLinux 10 (min. 2 GB RAM) sunucuda **root** olarak:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/install.sh | bash
 ```
 
 Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giriş bilgileri ekrana yazılır.
@@ -251,7 +251,7 @@ Güncelleme, **migration'ları uygulamadan önce** panel DB'sinin tam dump'ını
 Panelinizi, güncelleme aracı dağıtıma eklenmeden **önce** kurmuşsanız bu komut sunucunuzda bulunmaz. Aracı almanın tek yolu yine kendisi olduğu için kısır döngüye girersiniz. Tek seferlik şu komutla kurun:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yusufsayi/sanalpanel/main/assets/ops/sanalpanel-update \
+curl -fsSL https://raw.githubusercontent.com/sanalpanel/sanalpanel/main/assets/ops/sanalpanel-update \
   -o /usr/local/bin/sanalpanel-update && chmod +x /usr/local/bin/sanalpanel-update
 
 sanalpanel-update
