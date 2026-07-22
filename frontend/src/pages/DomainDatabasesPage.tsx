@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
+import { T } from '@/lib/tablo'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type DB = {
@@ -87,24 +88,24 @@ export default function DomainDatabasesPage() {
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
         {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> :
          dbler.length === 0 ? <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-500">Henüz veritabanı yok</div> :
-        <table className="w-full">
-          <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+        <table className={T.tablo}>
+          <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
             <tr>
-              <th className="text-left px-4 py-2.5">Veritabanı</th>
-              <th className="text-left px-4 py-2.5">Kullanıcı</th>
-              <th className="text-left px-4 py-2.5">Sunucu</th>
-              <th className="text-left px-4 py-2.5">Parola</th>
-              <th className="text-left px-4 py-2.5">Oluşturulma</th>
-              <th className="text-right px-4 py-2.5">İşlemler</th>
+              <th className={T.baslik}>Veritabanı</th>
+              <th className={T.baslik}>Kullanıcı</th>
+              <th className={T.baslik}>Sunucu</th>
+              <th className={T.baslik}>Parola</th>
+              <th className={T.baslik}>Oluşturulma</th>
+              <th className={`${T.baslik} text-right`}>İşlemler</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
             {dbler.map(d => (
-              <tr key={d.id} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-800 dark:text-slate-200">{d.db_adi}</td>
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_kullanici}</td>
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_host}:3306</td>
-                <td className="px-4 py-2.5 text-sm">
+              <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                <td className={T.hucreBaslik}><span className="font-mono lg:text-sm text-base">{d.db_adi}</span></td>
+                <td className={T.hucre} data-etiket="Kullanıcı"><span className="font-mono text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_kullanici}</span></td>
+                <td className={T.hucre} data-etiket="Sunucu"><span className="font-mono text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_host}:3306</span></td>
+                <td className={T.hucre} data-etiket="Parola">
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setParolaGoster({ ...paroliGoster, [d.id]: !paroliGoster[d.id] })}
@@ -120,8 +121,8 @@ export default function DomainDatabasesPage() {
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.olusturulma}</td>
-                <td className="px-4 py-2.5 text-right space-x-1">
+                <td className={T.hucre} data-etiket="Oluşturulma"><span className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.olusturulma}</span></td>
+                <td className={T.hucreAksiyon}>
                   <button onClick={() => pmaAc(d)} className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç">🔓 phpMyAdmin</button>
                   <button onClick={() => setPwResetFor(d)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">🔑 Parola Sıfırla</button>
                   <button onClick={() => setSilinecek(d)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">Sil</button>

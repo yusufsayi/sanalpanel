@@ -5,6 +5,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { T } from '@/lib/tablo'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type Yedek = { id: number; domain_id: number; tip: string; dosya: string; boyut_b: number; notlar: string; olusturma: string }
@@ -379,28 +380,28 @@ export default function DomainBackupsPage() {
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
         {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> :
          yedekler.length === 0 ? <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-500">Henüz yedek yok</div> :
-        <table className="w-full">
-          <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+        <table className={T.tablo}>
+          <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
             <tr>
-              <th className="text-left px-4 py-2.5">Dosya</th>
-              <th className="text-left px-4 py-2.5">Tip</th>
-              <th className="text-left px-4 py-2.5">Boyut</th>
-              <th className="text-left px-4 py-2.5">Oluşturulma</th>
-              <th className="text-right px-4 py-2.5">İşlemler</th>
+              <th className={T.baslik}>Dosya</th>
+              <th className={T.baslik}>Tip</th>
+              <th className={T.baslik}>Boyut</th>
+              <th className={T.baslik}>Oluşturulma</th>
+              <th className={`${T.baslik} text-right`}>İşlemler</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
             {yedekler.map(y => (
-              <tr key={y.id} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-800 dark:text-slate-200">{y.dosya}</td>
-                <td className="px-4 py-2.5">
+              <tr key={y.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                <td className={T.hucreBaslik}><span className="font-mono lg:text-sm text-base break-all">{y.dosya}</span></td>
+                <td className={T.hucre} data-etiket="Tip">
                   <span className={`text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
                     y.tip === 'planli' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500'
                   }`}>{y.tip === 'planli' ? 'Planlı' : y.tip}</span>
                 </td>
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</td>
-                <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{y.olusturma}</td>
-                <td className="px-4 py-2.5 text-right space-x-1">
+                <td className={T.hucre} data-etiket="Boyut"><span className="font-mono text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span></td>
+                <td className={T.hucre} data-etiket="Oluşturulma"><span className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{y.olusturma}</span></td>
+                <td className={T.hucreAksiyon}>
                   <button onClick={() => indir(y)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">İndir</button>
                   <button onClick={() => setGeriYukle(y)} className="text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 dark:bg-amber-900/20 px-2 py-1 rounded">↺ Geri Yükle</button>
                   <button onClick={() => setSilinecek(y)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">Sil</button>

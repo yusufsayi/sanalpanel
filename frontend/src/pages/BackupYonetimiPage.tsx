@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type OzetSatir = { domain_id: number; alan_adi: string; sayi: number; toplam_b: number; son_yedek: string }
 type Ozet = { domainler: OzetSatir[]; toplam_boyut_b: number; toplam_yedek: number; hedef_sayisi: number; zamanlama: string }
@@ -74,30 +75,30 @@ export default function BackupYonetimiPage() {
         <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Domain Yedekleri</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900/50 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
+        <div className="lg:overflow-x-auto">
+          <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Domain</th>
-                <th className="text-right font-medium px-4 py-2.5">Yedek Sayısı</th>
-                <th className="text-right font-medium px-4 py-2.5">Toplam Boyut</th>
-                <th className="text-left font-medium px-4 py-2.5">Son Yedek</th>
-                <th className="text-right font-medium px-4 py-2.5">İşlem</th>
+                <th className={T.baslik}>Domain</th>
+                <th className={`${T.baslik} text-right`}>Yedek Sayısı</th>
+                <th className={`${T.baslik} text-right`}>Toplam Boyut</th>
+                <th className={T.baslik}>Son Yedek</th>
+                <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-700/60`}>
               {yuk ? (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-400">Yükleniyor…</td></tr>
+                <tr><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
               ) : !o || o.domainler.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">Domain yok.</td></tr>
+                <tr><td colSpan={5} className={T.hucreDurum}>Domain yok.</td></tr>
               ) : (
                 o.domainler.map(d => (
-                  <tr key={d.domain_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">{d.alan_adi}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi ? fmtByte(d.toplam_b) : '—'}</td>
-                    <td className="px-4 py-2.5 text-xs font-mono text-slate-500 dark:text-slate-400">{d.son_yedek || <span className="text-slate-400">hiç</span>}</td>
-                    <td className="px-4 py-2.5 text-right">
+                  <tr key={d.domain_id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40`}>
+                    <td className={T.hucreBaslik}>{d.alan_adi}</td>
+                    <td className={T.hucre} data-etiket="Yedek Sayısı"><span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi}</span></td>
+                    <td className={T.hucre} data-etiket="Toplam Boyut"><span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi ? fmtByte(d.toplam_b) : '—'}</span></td>
+                    <td className={T.hucre} data-etiket="Son Yedek"><span className="font-mono text-xs text-slate-500 dark:text-slate-400">{d.son_yedek || <span className="text-slate-400">hiç</span>}</span></td>
+                    <td className={T.hucreAksiyon}>
                       <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700">Yönet →</Link>
                     </td>
                   </tr>

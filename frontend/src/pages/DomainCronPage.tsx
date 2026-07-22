@@ -5,6 +5,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
+import { T } from '@/lib/tablo'
 
 type Gorev = {
   idx: number
@@ -110,32 +111,32 @@ export default function DomainCronPage() {
             <p className="text-sm text-slate-500 dark:text-slate-500">Henüz görev yok. Yukarıdan ekleyin.</p>
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+          <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className="text-left px-4 py-2.5">Dak</th>
-                <th className="text-left px-4 py-2.5">Saat</th>
-                <th className="text-left px-4 py-2.5">Gün</th>
-                <th className="text-left px-4 py-2.5">Ay</th>
-                <th className="text-left px-4 py-2.5">Hafta</th>
-                <th className="text-left px-4 py-2.5">Komut / Açıklama</th>
-                <th className="text-right px-4 py-2.5">İşlem</th>
+                <th className={T.baslik}>Komut / Açıklama</th>
+                <th className={T.baslik}>Dak</th>
+                <th className={T.baslik}>Saat</th>
+                <th className={T.baslik}>Gün</th>
+                <th className={T.baslik}>Ay</th>
+                <th className={T.baslik}>Hafta</th>
+                <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
               {gorevler.map((g) => (
-                <tr key={g.idx} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.dakika}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.saat}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.gun}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.ay}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.hafta}</td>
-                  <td className="px-4 py-2.5 text-sm">
-                    <div className="font-mono text-slate-800 dark:text-slate-200 truncate max-w-md" title={g.komut}>{g.komut}</div>
-                    {g.yorum && <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
+                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                  <td className={T.hucreBaslik}>
+                    <div className="font-mono text-slate-800 dark:text-slate-200 truncate max-w-md lg:text-sm text-base" title={g.komut}>{g.komut}</div>
+                    {g.yorum && <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5 font-normal">{g.yorum}</div>}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
+                  <td className={T.hucre} data-etiket="Dak"><span className="font-mono">{g.dakika}</span></td>
+                  <td className={T.hucre} data-etiket="Saat"><span className="font-mono">{g.saat}</span></td>
+                  <td className={T.hucre} data-etiket="Gün"><span className="font-mono">{g.gun}</span></td>
+                  <td className={T.hucre} data-etiket="Ay"><span className="font-mono">{g.ay}</span></td>
+                  <td className={T.hucre} data-etiket="Hafta"><span className="font-mono">{g.hafta}</span></td>
+                  <td className={T.hucreAksiyon}>
+                    <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 -mx-2 lg:mx-0 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
                   </td>
                 </tr>
               ))}

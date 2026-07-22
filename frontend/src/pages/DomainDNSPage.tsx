@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { T } from '@/lib/tablo'
 
 type Kayit = {
   id: number
@@ -314,45 +315,45 @@ export default function DomainDNSPage() {
             </button>
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+          <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className="px-4 py-2.5 w-10">
+                <th className={`${T.baslik} w-10`}>
                   <input type="checkbox" aria-label="Tümünü seç" checked={kayitlar.length > 0 && secili.size === kayitlar.length}
                     ref={el => { if (el) el.indeterminate = secili.size > 0 && secili.size < kayitlar.length }}
                     onChange={hepsiniSec} className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
                 </th>
-                <th className="text-left px-4 py-2.5">Ad</th>
-                <th className="text-left px-4 py-2.5">Tip</th>
-                <th className="text-left px-4 py-2.5">Değer</th>
-                <th className="text-left px-4 py-2.5">TTL</th>
-                <th className="text-left px-4 py-2.5">Öncelik</th>
-                <th className="text-left px-4 py-2.5">Durum</th>
-                <th className="text-right px-4 py-2.5">İşlemler</th>
+                <th className={T.baslik}>Ad</th>
+                <th className={T.baslik}>Tip</th>
+                <th className={T.baslik}>Değer</th>
+                <th className={T.baslik}>TTL</th>
+                <th className={T.baslik}>Öncelik</th>
+                <th className={T.baslik}>Durum</th>
+                <th className={`${T.baslik} text-right`}>İşlemler</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
               {kayitlar.map(k => (
-                <tr key={k.id} className={secili.has(k.id) ? 'bg-brand-50/60 dark:bg-brand-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}>
-                  <td className="px-4 py-2.5">
+                <tr key={k.id} className={`${T.satir} ${secili.has(k.id) ? 'lg:bg-brand-50/60 dark:lg:bg-brand-900/10' : 'lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60'}`}>
+                  <td className={T.hucreSecim}>
                     <input type="checkbox" aria-label={`${k.ad} ${k.tip} seç`} checked={secili.has(k.id)} onChange={() => secimDegistir(k.id)}
                       className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
                   </td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{k.ad}</td>
-                  <td className="px-4 py-2.5">
+                  <td className={T.hucreBaslikSecimli}><span className="font-mono lg:text-sm text-base">{k.ad}</span></td>
+                  <td className={T.hucre} data-etiket="Tip">
                     <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">{k.tip}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-800 dark:text-slate-200 break-all">{k.deger}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.ttl}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.tip === 'MX' || k.tip === 'SRV' ? k.oncelik : '—'}</td>
-                  <td className="px-4 py-2.5">
+                  <td className={T.hucre} data-etiket="Değer"><span className="font-mono text-sm text-slate-800 dark:text-slate-200 break-all">{k.deger}</span></td>
+                  <td className={T.hucre} data-etiket="TTL"><span className="font-mono text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.ttl}</span></td>
+                  <td className={T.hucre} data-etiket="Öncelik"><span className="font-mono text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.tip === 'MX' || k.tip === 'SRV' ? k.oncelik : '—'}</span></td>
+                  <td className={T.hucre} data-etiket="Durum">
                     {k.aktif ? (
                       <span className="text-xs text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Aktif</span>
                     ) : (
                       <span className="text-xs text-slate-500 dark:text-slate-500">Pasif</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-right space-x-1">
+                  <td className={T.hucreAksiyon}>
                     <button onClick={() => setDuzenle(k)} className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800">Düzenle</button>
                     <button onClick={() => setSilinecek(k)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20">Sil</button>
                   </td>

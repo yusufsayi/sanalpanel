@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Row = {
   id?: number
@@ -92,47 +93,48 @@ export default function DNSSablonuPage() {
         <>
           {/* Kayıt satırları */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden mb-5">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+            <div className="lg:overflow-x-auto">
+              <table className={T.tablo}>
+                <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
                   <tr>
-                    <th className="text-left px-3 py-2.5 w-40">Ad (alt-ad)</th>
-                    <th className="text-left px-3 py-2.5 w-28">Tip</th>
-                    <th className="text-left px-3 py-2.5">Değer</th>
-                    <th className="text-left px-3 py-2.5 w-24">TTL</th>
-                    <th className="text-left px-3 py-2.5 w-24">Öncelik</th>
-                    <th className="text-center px-3 py-2.5 w-20">Aktif</th>
-                    <th className="px-3 py-2.5 w-12"></th>
+                    <th className={`${T.baslik} w-40`}>Ad (alt-ad)</th>
+                    <th className={`${T.baslik} w-28`}>Tip</th>
+                    <th className={T.baslik}>Değer</th>
+                    <th className={`${T.baslik} w-24`}>TTL</th>
+                    <th className={`${T.baslik} w-24`}>Öncelik</th>
+                    <th className={`${T.baslik} text-center w-20`}>Aktif</th>
+                    <th className={`${T.baslik} w-12`}></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
                   {rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                      <td className="px-3 py-2"><input value={r.ad} onChange={e => setRow(i, { ad: e.target.value })} className={inp + ' font-mono'} /></td>
-                      <td className="px-3 py-2">
-                        <select value={r.tip} onChange={e => setRow(i, { tip: e.target.value })} className={inp + ' font-mono'}>
+                    <tr key={i} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60`}>
+                      <td className={T.hucreBaslik}><input value={r.ad} onChange={e => setRow(i, { ad: e.target.value })} className={inp + ' font-mono w-full'} /></td>
+                      <td className={T.hucre} data-etiket="Tip">
+                        <select value={r.tip} onChange={e => setRow(i, { tip: e.target.value })} className={inp + ' font-mono w-full'}>
                           {TIPLER.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </td>
-                      <td className="px-3 py-2"><input value={r.deger} onChange={e => setRow(i, { deger: e.target.value })} className={inp + ' font-mono'} /></td>
-                      <td className="px-3 py-2"><input type="number" min={60} value={r.ttl} onChange={e => setRow(i, { ttl: parseInt(e.target.value) || 3600 })} className={inp + ' font-mono'} /></td>
-                      <td className="px-3 py-2">
+                      <td className={T.hucre} data-etiket="Değer"><input value={r.deger} onChange={e => setRow(i, { deger: e.target.value })} className={inp + ' font-mono w-full'} /></td>
+                      <td className={T.hucre} data-etiket="TTL"><input type="number" min={60} value={r.ttl} onChange={e => setRow(i, { ttl: parseInt(e.target.value) || 3600 })} className={inp + ' font-mono w-full'} /></td>
+                      <td className={T.hucre} data-etiket="Öncelik">
                         {(r.tip === 'MX' || r.tip === 'SRV')
-                          ? <input type="number" min={0} value={r.oncelik} onChange={e => setRow(i, { oncelik: parseInt(e.target.value) || 0 })} className={inp + ' font-mono'} />
+                          ? <input type="number" min={0} value={r.oncelik} onChange={e => setRow(i, { oncelik: parseInt(e.target.value) || 0 })} className={inp + ' font-mono w-full'} />
                           : <span className="text-slate-300 dark:text-slate-600 text-sm pl-2">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-center">
+                      <td className={T.hucre} data-etiket="Aktif">
                         <input type="checkbox" checked={r.aktif} onChange={e => setRow(i, { aktif: e.target.checked })} className="cursor-pointer w-4 h-4 accent-brand-600" />
                       </td>
-                      <td className="px-3 py-2 text-center">
+                      <td className={T.hucreAksiyon}>
                         <button onClick={() => satirSil(i)} title="Satırı sil" className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                          <span className="lg:hidden ml-1.5 text-xs">Satırı sil</span>
                         </button>
                       </td>
                     </tr>
                   ))}
                   {rows.length === 0 && (
-                    <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">Şablonda kayıt yok — "Kayıt Ekle" ile başlayın.</td></tr>
+                    <tr><td colSpan={7} className={T.hucreDurum}>Şablonda kayıt yok — "Kayıt Ekle" ile başlayın.</td></tr>
                   )}
                 </tbody>
               </table>

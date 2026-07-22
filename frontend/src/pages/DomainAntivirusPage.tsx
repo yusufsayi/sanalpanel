@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
@@ -125,24 +126,24 @@ export default function DomainAntivirusPage() {
               <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Temiz — zararlı yazılım bulunmadı.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className="py-2 pr-3">Dosya</th><th className="py-2 pr-3">İmza</th><th className="py-2 pr-3">Motor</th><th className="py-2 pr-3">Durum</th><th></th>
+            <div className="lg:overflow-x-auto">
+              <table className={T.tablo}>
+                <thead className={T.baslikGrubu}>
+                  <tr className="text-left border-b border-slate-100 dark:border-slate-700">
+                    <th className={T.baslik}>Dosya</th><th className={T.baslik}>İmza</th><th className={T.baslik}>Motor</th><th className={T.baslik}>Durum</th><th className={T.baslik}></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className={T.govde}>
                   {d.bulgular.map((b, i) => (
-                    <tr key={i} className="border-b border-slate-50 dark:border-slate-800">
-                      <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300 break-all max-w-xs">{b.dosya}</td>
-                      <td className="py-2 pr-3 text-slate-700 dark:text-slate-200">{b.imza}</td>
-                      <td className="py-2 pr-3"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
-                      <td className="py-2 pr-3">
+                    <tr key={i} className={`${T.satir} lg:border-b lg:border-slate-50 dark:lg:border-slate-800`}>
+                      <td className={T.hucreBaslik}><span className="font-mono text-xs lg:text-xs text-sm break-all">{b.dosya}</span></td>
+                      <td className={T.hucre} data-etiket="İmza"><span className="text-slate-700 dark:text-slate-200">{b.imza}</span></td>
+                      <td className={T.hucre} data-etiket="Motor"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
+                      <td className={T.hucre} data-etiket="Durum">
                         {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
                           : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
                       </td>
-                      <td className="py-2 text-right">
+                      <td className={T.hucreAksiyon}>
                         {!b.karantina && <button onClick={() => karantina(b)} className="text-xs text-red-600 dark:text-red-400 hover:underline whitespace-nowrap">Karantinaya al</button>}
                       </td>
                     </tr>

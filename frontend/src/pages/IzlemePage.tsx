@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type CPU = { yuzde: number; cekirdek: number; yuk_1dk: number; yuk_5dk: number; yuk_15dk: number }
 type Bellek = { toplam_kb: number; kullanilan_kb: number; bos_kb: number; yuzde: number }
@@ -195,31 +196,39 @@ function SunucuIzleme() {
             className={`text-[11px] px-2 py-1 rounded ${procSort === 'mem' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>Bellek</button>
         </div>
       }>
-        <table className="w-full text-sm">
-          <thead className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
-            <tr>
-              <th className="text-left py-2 w-16">PID</th>
-              <th className="text-left py-2">Kullanıcı</th>
-              <th className="text-right py-2 w-16">CPU%</th>
-              <th className="text-right py-2 w-16">MEM%</th>
-              <th className="text-left py-2">Komut</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {procs.length === 0 && (
-              <tr><td colSpan={5} className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">Yükleniyor…</td></tr>
-            )}
-            {procs.map(p => (
-              <tr key={p.pid} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <td className="py-1.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{p.pid}</td>
-                <td className="py-1.5 font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[120px]">{p.user}</td>
-                <td className={`py-1.5 text-right font-mono text-xs ${p.cpu_yuzde >= 50 ? 'text-red-600 dark:text-red-400 font-semibold' : p.cpu_yuzde >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.cpu_yuzde.toFixed(1)}</td>
-                <td className={`py-1.5 text-right font-mono text-xs ${p.mem_yuzde >= 30 ? 'text-red-600 dark:text-red-400 font-semibold' : p.mem_yuzde >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.mem_yuzde.toFixed(1)}</td>
-                <td className="py-1.5 font-mono text-xs text-slate-800 dark:text-slate-200 truncate max-w-md" title={p.komut}>{p.komut}</td>
+        <div className="lg:overflow-x-auto">
+          <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} border-b border-slate-200 dark:border-slate-700`}>
+              <tr>
+                <th className={T.baslik}>PID</th>
+                <th className={T.baslik}>Kullanıcı</th>
+                <th className={`${T.baslik} text-right`}>CPU%</th>
+                <th className={`${T.baslik} text-right`}>MEM%</th>
+                <th className={T.baslik}>Komut</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
+              {procs.length === 0 && (
+                <tr><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
+              )}
+              {procs.map(p => (
+                <tr key={p.pid} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                  <td className={T.hucre} data-etiket="PID"><span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{p.pid}</span></td>
+                  <td className={T.hucreBaslik}><span className="font-mono text-xs lg:text-xs text-base truncate max-w-[160px] inline-block align-bottom">{p.user}</span></td>
+                  <td className={T.hucre} data-etiket="CPU%">
+                    <span className={`font-mono text-xs ${p.cpu_yuzde >= 50 ? 'text-red-600 dark:text-red-400 font-semibold' : p.cpu_yuzde >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.cpu_yuzde.toFixed(1)}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="MEM%">
+                    <span className={`font-mono text-xs ${p.mem_yuzde >= 30 ? 'text-red-600 dark:text-red-400 font-semibold' : p.mem_yuzde >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.mem_yuzde.toFixed(1)}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Komut">
+                    <span className="font-mono text-xs text-slate-800 dark:text-slate-200 truncate max-w-md" title={p.komut}>{p.komut}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Kart>
     </>
   )
