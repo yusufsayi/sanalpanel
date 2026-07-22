@@ -117,14 +117,21 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"ok": true, "domain": domain, "ssl_durum": sslDurum}
 	if sslDurum != "aktif" {
+		port443VhostSil() // gerçek LE yoksa port'suz erişim asla açılmaz (bkz. vhost443.go)
 		resp["uyari"] = "Domain kaydedildi ama Let's Encrypt sertifikası alınamadı: " + sslHata +
 			" — panel şu an yine sunucu IP'si ve mevcut sertifikayla erişilebilir durumda."
+	} else if err := port443VhostYaz(domain); err != nil {
+		// SSL kuruldu, sadece port'suz-erişim adımı basarisiz oldu — istek yine de
+		// basarili sayilir, :8443 zaten calisiyor.
+		resp["uyari"] = "SSL kuruldu ama port'suz erişim (https://" + domain + ") ayarlanamadı: " +
+			err.Error() + " — https://" + domain + ":8443 üzerinden erişebilirsiniz."
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) Kaldir(w http.ResponseWriter, r *http.Request) {
 	selfSignedaDon()
+	port443VhostSil()
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE panel_ayarlari SET ozel_domain=NULL, ssl_durum='yok', ssl_hata=NULL, ssl_bitis=NULL WHERE id=1`); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())

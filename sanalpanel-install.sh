@@ -171,8 +171,9 @@ step "8) nginx (panel vhost + phpMyAdmin + perf)"
 # zaten var; burada da eklersek "duplicate directive" ile nginx -t patlar.
 grep -q "client_max_body_size 10240m" /etc/nginx/nginx.conf || \
   sed -i '/^http {/a\    client_max_body_size 10240m;' /etc/nginx/nginx.conf
-cp "$A/nginx/_panel.conf"    /etc/nginx/conf.d/_panel.conf
+cp "$A/nginx/_panel.conf"     /etc/nginx/conf.d/_panel.conf
 cp "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf
+cp "$A/nginx/_default443.conf" /etc/nginx/conf.d/_default443.conf
 cp "$A/nginx/php-fpm.conf"    /etc/nginx/conf.d/php-fpm.conf 2>/dev/null
 nginx -t >/dev/null 2>&1 && ok "nginx -t OK" || { nginx -t; die "nginx config hatası"; }
 

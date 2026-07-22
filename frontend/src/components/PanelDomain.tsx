@@ -37,7 +37,7 @@ export default function PanelDomain() {
     try {
       const r = await api.post('/system/panel-domain', { domain: domain.trim() })
       if (r.data.uyari) setUyari(r.data.uyari)
-      else setBasari(`✓ Sertifika kuruldu — https://${domain.trim()}:8443 üzerinden erişebilirsiniz`)
+      else setBasari(`✓ Sertifika kuruldu — https://${domain.trim()} üzerinden erişebilirsiniz`)
       yukle()
     } catch (e: any) {
       setHata(e?.response?.data?.hata || e?.message || 'kaydedilemedi')
@@ -66,15 +66,16 @@ export default function PanelDomain() {
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">Otomatik SSL</span>
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-            Panele çıplak IP yerine kendi alan adınızla girin. Domainin A kaydı bu sunucuyu
+            Panele çıplak IP yerine kendi alan adınızla, port yazmadan girin. Domainin A kaydı bu sunucuyu
             {durum?.sunucu_ip ? <> (<code className="text-[11px]">{durum.sunucu_ip}</code>)</> : null} göstermelidir — kaydedince
-            panel otomatik olarak gerçek bir Let's Encrypt sertifikası kurar.
+            panel otomatik olarak gerçek bir Let's Encrypt sertifikası kurar. Panel her zaman
+            <code className="text-[11px]"> https://{durum?.sunucu_ip || 'sunucu-ip'}:8443</code> üzerinden de erişilebilir kalır (yedek erişim).
           </div>
 
           {durum?.ssl_durum === 'aktif' && (
             <div className="mt-2 inline-flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              SSL aktif{durum.ssl_bitis ? ` — ${durum.ssl_bitis} tarihine kadar geçerli` : ''}
+              SSL aktif{durum.ssl_bitis ? ` — ${durum.ssl_bitis} tarihine kadar geçerli` : ''} — https://{durum.ozel_domain} üzerinden port yazmadan erişebilirsiniz
             </div>
           )}
           {durum?.ssl_durum === 'basarisiz' && durum.ssl_hata && (
