@@ -3,8 +3,12 @@
 // sp-mobil-v1
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { api } from '@/lib/api'
 import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
+
+const SURUM_UYARI_KAPALI_KEY = 'sp-surum-duyuru-kapatildi'
+type SurumKontrol = { guncelleme_var: boolean; kritik: boolean; duyuru: string; son: string }
 
 type NavItem = { to: string; etiket: string; ikon: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -60,6 +64,23 @@ export default function DashboardLayout() {
   // bu durum yalnızca < lg genişliklerde anlam taşır.
   const [mobilAcik, setMobilAcik] = useState(false)
   const konum = useLocation()
+
+  // Kritik güvenlik duyurusu — günde bir kez sunucu tarafında kontrol edilen
+  // surum.json'dan gelir (bkz. internal/system/surumkontrol.go). Yalnız KRİTİK
+  // duyurular burada gösterilir; rutin sürüm bilgisi Araçlar → Panel Güncelleme
+  // kartında zaten var. Kapatma, aynı duyuru metni için kalıcıdır — yeni bir
+  // duyuru gelirse (anahtar değişir) otomatik tekrar gösterilir.
+  const [surum, setSurum] = useState<SurumKontrol | null>(null)
+  const [duyuruKapali, setDuyuruKapali] = useState(false)
+  useEffect(() => {
+    api.get<SurumKontrol>('/system/surum-kontrol')
+      .then((r) => {
+        setSurum(r.data)
+        const anahtar = `${r.data.son}:${r.data.duyuru}`
+        setDuyuruKapali(localStorage.getItem(SURUM_UYARI_KAPALI_KEY) === anahtar)
+      })
+      .catch(() => {})
+  }, [])
 
   // Rota değişince çekmeceyi kapat (link tıklamasında da onClick kapatıyor;
   // bu, geri/ileri gezinmesini de kapsayan güvenli ağ).
@@ -203,6 +224,32 @@ export default function DashboardLayout() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar onMenuAc={() => setMobilAcik(true)} menuAcik={mobilAcik} />
+
+        {surum?.kritik && !duyuruKapali && (
+          <div className="flex items-start gap-3 bg-red-600 px-4 py-2.5 text-white sm:items-center">
+            <svg className="mt-0.5 h-5 w-5 shrink-0 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.363 3.591 2.257 17.657a1.5 1.5 0 0 0 1.302 2.25h16.882a1.5 1.5 0 0 0 1.302-2.25L13.638 3.591a1.5 1.5 0 0 0-2.598 0Z" />
+            </svg>
+            <span className="min-w-0 flex-1 text-sm">
+              <strong className="font-semibold">Kritik güvenlik duyurusu (v{surum.son}):</strong>{' '}
+              {surum.duyuru || 'Sürüm güncellemesi önerilir.'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem(SURUM_UYARI_KAPALI_KEY, `${surum.son}:${surum.duyuru}`)
+                setDuyuruKapali(true)
+              }}
+              className="shrink-0 -m-1 rounded-md p-1 hover:bg-red-700"
+              aria-label="Duyuruyu kapat"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         <main className="flex-1 min-w-0 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0">
           <Outlet />
         </main>
