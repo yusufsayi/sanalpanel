@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import LoadHistoryChart from '@/components/LoadHistoryChart'
+import CveWidget from '@/components/CveWidget'
 
 type SistemInfo = {
   hostname: string; ip: string; os_adi: string; kernel: string
@@ -177,24 +178,28 @@ export default function HomePage() {
         </Kart>
       </div>
 
-      {/* Servisler — kompakt çipler */}
-      <Kart baslik="Servisler" className="mb-3">
-        {!s ? <Yukleniyor /> : (
-          <div className="flex flex-wrap gap-1.5">
-            {s.servisler.map((sv) => (
-              <span key={sv.ad} title={sv.ad}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border ${
-                  sv.aktif
-                    ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                    : 'border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
-                }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${sv.aktif ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                {sv.etiket}
-              </span>
-            ))}
-          </div>
-        )}
-      </Kart>
+      {/* Güvenlik açıkları (CVE/KernelCare) · Servisler */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+        <CveWidget />
+
+        <Kart baslik="Servisler">
+          {!s ? <Yukleniyor /> : (
+            <div className="flex flex-wrap gap-1.5">
+              {s.servisler.map((sv) => (
+                <span key={sv.ad} title={sv.ad}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border ${
+                    sv.aktif
+                      ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                      : 'border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+                  }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${sv.aktif ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {sv.etiket}
+                </span>
+              ))}
+            </div>
+          )}
+        </Kart>
+      </div>
 
       {/* Son domainler — kompakt tablo */}
       <Kart baslik="Son Domainler">
