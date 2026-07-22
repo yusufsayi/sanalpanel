@@ -210,6 +210,8 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
 			r.With(middleware.AdminOnly).Put("/me", authH.ProfilGuncelle)
+			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
+			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
 			r.With(middleware.AdminOnly).Post("/me/parola", authH.ParolaDegistir)
 			r.With(middleware.AdminOnly).Get("/me/2fa/setup", authH.TwoFASetup)
 			r.With(middleware.AdminOnly).Post("/me/2fa/enable", authH.TwoFAEnable)
