@@ -81,11 +81,20 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var certYol, keyYol string
+	// gercekTip: FIILEN kurulan sertifika tipi. req.Tip "letsencrypt" istese bile,
+	// LE cekimi basarisiz olup sslFailSafe self-signed'a duserse gercekTip
+	// "self-signed" kalir — panel kendi DB'sine ASLA yalan soylemez (canlida
+	// gozlemlenen "kuruldu gosteriyor ama kurmuyor" hatasinin kok nedeni buydu).
+	gercekTip := req.Tip
 	switch req.Tip {
 	case "self-signed":
 		certYol, keyYol, err = provisioner.EnableSelfSigned(alanAdi, sk, phpSurum, backend)
 	case "letsencrypt":
-		certYol, keyYol, err = provisioner.EnableLetsEncrypt(alanAdi, sk, phpSurum, backend)
+		var gercek bool
+		certYol, keyYol, gercek, err = provisioner.EnableLetsEncrypt(alanAdi, sk, phpSurum, backend)
+		if !gercek {
+			gercekTip = "self-signed"
+		}
 	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "SSL kurulum: "+err.Error())
@@ -93,25 +102,29 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bitis := time.Now().Add(365 * 24 * time.Hour)
-	if req.Tip == "letsencrypt" {
+	if gercekTip == "letsencrypt" {
 		bitis = time.Now().Add(90 * 24 * time.Hour)
 	}
 
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE domains SET ssl_aktif=1, ssl_kaynak=?, cert_path=?, key_path=?, ssl_bitis=?
-		 WHERE id=?`, req.Tip, certYol, keyYol, bitis, id); err != nil {
+		 WHERE id=?`, gercekTip, certYol, keyYol, bitis, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
 	}
 
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"id":     id,
-		"tip":    req.Tip,
-		"cert":   certYol,
-		"key":    keyYol,
-		"bitis":  bitis.Format("2006-01-02"),
-	})
+	resp := map[string]any{
+		"ok":    true,
+		"id":    id,
+		"tip":   gercekTip,
+		"cert":  certYol,
+		"key":   keyYol,
+		"bitis": bitis.Format("2006-01-02"),
+	}
+	if req.Tip == "letsencrypt" && gercekTip != "letsencrypt" {
+		resp["uyari"] = "Let's Encrypt sertifikası alınamadı (domain DNS'i sunucuya işaret etmiyor olabilir); site geçici olarak self-signed sertifika ile korunuyor, DNS düzelince tekrar deneyin."
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) SSLDisable(w http.ResponseWriter, r *http.Request) {

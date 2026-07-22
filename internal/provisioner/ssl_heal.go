@@ -126,7 +126,7 @@ func enIyiCertBul(domain string, minGun int) (certPath, keyPath string, gercekCA
 	var bestReal bool
 	var bestNotAfter time.Time
 	for _, a := range adaylar {
-		if !certGecerliMi(a.cert, a.key, minGun, domain, "www."+domain) {
+		if !certGecerliMi(a.cert, a.key, minGun, wwwHostlar(domain)...) {
 			continue
 		}
 		leaf, ok := leafOku(a.cert, a.key)
@@ -181,6 +181,11 @@ func selfSignedUret(domain string) (certPath, keyPath string, err error) {
 	certPath = filepath.Join(sslDir, domain+".crt")
 	keyPath = filepath.Join(sslDir, domain+".key")
 	subj := fmt.Sprintf("/C=TR/ST=Local/L=SanalPanel/O=%s/CN=%s", domain, domain)
+	sanHostlar := wwwHostlar(domain)
+	san := make([]string, len(sanHostlar))
+	for i, h := range sanHostlar {
+		san[i] = "DNS:" + h
+	}
 	args := []string{
 		"req", "-x509", "-nodes",
 		"-newkey", "rsa:2048",
@@ -188,7 +193,7 @@ func selfSignedUret(domain string) (certPath, keyPath string, err error) {
 		"-out", certPath,
 		"-days", "365",
 		"-subj", subj,
-		"-addext", "subjectAltName=DNS:" + domain + ",DNS:www." + domain,
+		"-addext", "subjectAltName=" + strings.Join(san, ","),
 	}
 	if out, e := exec.Command("openssl", args...).CombinedOutput(); e != nil {
 		return "", "", fmt.Errorf("openssl: %s: %w", strings.TrimSpace(string(out)), e)
@@ -219,30 +224,30 @@ func sslVhostYaz(alanAdi, sk, phpSurum, backend, certPath, keyPath, kaynak strin
 // HTTP-only'ye dusmez. Gecerli cert (acme store veya /etc/pki, not-expired, domain+www,
 // key eslesen) varsa onu deploy eder; hic yoksa self-signed uretir. Her iki halde de
 // vhost SSL-li (443 dinler) render edilir.
-func sslFailSafe(alanAdi, sk, phpSurum, backend, sebep string) (certPath, keyPath string, err error) {
-	if src, srcKey, real := enIyiCertBul(alanAdi, 0); src != "" {
+func sslFailSafe(alanAdi, sk, phpSurum, backend, sebep string) (certPath, keyPath string, real bool, err error) {
+	if src, srcKey, gercek := enIyiCertBul(alanAdi, 0); src != "" {
 		if cp, kp, e := certiPkiyeKur(alanAdi, src, srcKey); e == nil {
 			kaynak := "self-signed"
-			if real {
+			if gercek {
 				kaynak = "letsencrypt"
 			}
 			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, kaynak); e != nil {
-				return "", "", e
+				return "", "", false, e
 			}
 			log.Printf("ssl fail-safe: %s LE cekimi basarisiz (%s) — mevcut %s cert ile 443 KORUNDU", alanAdi, sebep, kaynak)
-			return cp, kp, nil
+			return cp, kp, gercek, nil
 		}
 	}
 	// Hic gecerli cert yok → self-signed fallback (443 yine dinler, teardown YOK).
 	cp, kp, e := selfSignedUret(alanAdi)
 	if e != nil {
-		return "", "", fmt.Errorf("%s + self-signed fallback: %w", sebep, e)
+		return "", "", false, fmt.Errorf("%s + self-signed fallback: %w", sebep, e)
 	}
 	if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, "self-signed"); e != nil {
-		return "", "", e
+		return "", "", false, e
 	}
 	log.Printf("ssl fail-safe: %s LE cekimi basarisiz (%s) — self-signed uretildi, 443 KORUNDU", alanAdi, sebep)
-	return cp, kp, nil
+	return cp, kp, false, nil
 }
 
 // HealSSLVhost443OnStartup: SSL-etkin (ssl_aktif=1) her domain'in vhost'unda 443 blogu

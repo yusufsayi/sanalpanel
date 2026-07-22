@@ -37,6 +37,7 @@ export default function DomainsPage() {
   const [secili, setSecili] = useState<Set<number>>(new Set())
   const [isleniyor, setIsleniyor] = useState(false)
   const [silOnay, setSilOnay] = useState(false)
+  const [silOnayMetin, setSilOnayMetin] = useState('')
 
   const [planlar, setPlanlar] = useState<Plan[]>([])
   const [phpSurumler, setPhpSurumler] = useState<PHPVer[]>([])
@@ -166,7 +167,7 @@ export default function DomainsPage() {
   }
 
   async function topluSil() {
-    setSilOnay(false); setIsleniyor(true); setHata(null)
+    setSilOnay(false); setSilOnayMetin(''); setIsleniyor(true); setHata(null)
     const ids = Array.from(secili); let basarili = 0
     for (const id of ids) {
       try { await api.delete(`/domains/${id}`); basarili++ } catch {}
@@ -225,7 +226,7 @@ export default function DomainsPage() {
             className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded">
             ⏸ Pasif Et
           </button>
-          <button onClick={() => setSilOnay(true)} disabled={isleniyor}
+          <button onClick={() => { setSilOnayMetin(''); setSilOnay(true) }} disabled={isleniyor}
             className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">
             🗑 Sil ({secili.size})
           </button>
@@ -435,7 +436,12 @@ export default function DomainsPage() {
       )}
 
       {/* Toplu Sil Onay */}
-      {silOnay && (
+      {silOnay && (() => {
+        const tekId = secili.size === 1 ? Array.from(secili)[0] : undefined
+        const tekDomain = tekId !== undefined ? items.find(x => x.id === tekId)?.alan_adi : undefined
+        const beklenenMetin = tekDomain || 'SİL'
+        const silOnaylandi = silOnayMetin === beklenenMetin
+        return (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSilOnay(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">⚠ Toplu Domain Silme</h3>
@@ -449,17 +455,32 @@ export default function DomainsPage() {
               })}
               {secili.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {secili.size - 8} daha…</li>}
             </ul>
+            <label className="block text-xs text-slate-500 dark:text-slate-500 mb-1.5">
+              Onaylamak için <span className="font-mono font-semibold text-red-700 dark:text-red-300">{beklenenMetin}</span> yazın:
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={silOnayMetin}
+              onChange={e => setSilOnayMetin(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && silOnaylandi && !isleniyor) topluSil() }}
+              placeholder={beklenenMetin}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 mb-4 focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
             <div className="flex justify-end gap-2">
               <button onClick={() => setSilOnay(false)}
                 className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
-              <button onClick={topluSil} disabled={isleniyor}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
+              <button onClick={topluSil} disabled={isleniyor || !silOnaylandi}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded font-medium">
                 Evet, Sil
               </button>
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

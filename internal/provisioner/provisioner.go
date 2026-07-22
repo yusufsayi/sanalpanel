@@ -242,7 +242,7 @@ var vhostTmpl = template.Must(template.New("v").Parse(`{{- if .SSL -}}
 server {
     listen 80;
     listen [::]:80;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     location /.well-known/acme-challenge/ {
         root /var/www/_acme;
@@ -259,7 +259,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     ssl_certificate     {{.CertPath}};
     ssl_certificate_key {{.KeyPath}};
@@ -343,7 +343,7 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     root {{.WebRoot}};
     index index.php index.html index.htm;
@@ -479,7 +479,7 @@ var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} �
 server {
     listen 80;
     listen [::]:80;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     location /.well-known/acme-challenge/ {
         root /var/www/_acme;
@@ -505,7 +505,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     ssl_certificate     {{.CertPath}};
     ssl_certificate_key {{.KeyPath}};
@@ -596,6 +596,22 @@ type VhostOpts struct {
 
 func (o VhostOpts) SSL() bool {
 	return o.CertPath != "" && o.KeyPath != ""
+}
+
+// SunucuAdlari: server_name direktifinde kullanilacak host listesi. Domain zaten
+// "www." ile basliyorsa ikinci bir "www.www." takma adi EKLENMEZ — DNS'te hicbir
+// zaman var olamayacagi icin ACME dogrulamasi (ve cert kapsam kontrolu) hep
+// basarisiz olur, LE sertifikasi asla alinamaz hale gelirdi.
+func (o VhostOpts) SunucuAdlari() string {
+	return strings.Join(wwwHostlar(o.AlanAdi), " ")
+}
+
+// wwwHostlar: bir domain icin sertifikanin/vhost'un kapsamasi gereken host listesi.
+func wwwHostlar(domain string) []string {
+	if strings.HasPrefix(strings.ToLower(domain), "www.") {
+		return []string{domain}
+	}
+	return []string{domain, "www." + domain}
 }
 
 type Result struct {
@@ -973,9 +989,9 @@ func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath 
 //     Bu, aynı SAN setiyle tekrar-çekimi (LE 429 rate-limit) HİÇ tetiklemez.
 //  2. FAIL-SAFE: acme çekimi başarısız olursa (429 dahil) → sslFailSafe mevcut/self-
 //     signed cert ile 443'ü KORUR. Hiçbir durumda vhost HTTP-only'ye DÜŞMEZ.
-func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
+func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, real bool, err error) {
 	if verr := ValidateDomain(alanAdi); verr != nil {
-		return "", "", verr // path güvenliği
+		return "", "", false, verr // path güvenliği
 	}
 	phpSurum = normalizePHP(phpSurum)
 
@@ -992,14 +1008,14 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	// izlenimi verir (gerçek CA'dan hiç cert alınmaz). Bu, canlıda tam olarak
 	// gözlemlenen hataydı: sanalpanel.tr'de "tip":"letsencrypt" isteği ok:true
 	// dönüyordu ama sertifika dosyası hiç değişmiyordu.
-	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" && real {
+	if src, srcKey, gercek := enIyiCertBul(alanAdi, 30); src != "" && gercek {
 		if cp, kp, e := certiPkiyeKur(alanAdi, src, srcKey); e == nil {
 			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, "letsencrypt"); e != nil {
-				return "", "", e
+				return "", "", false, e
 			}
 			removeHomeCert(sk, alanAdi)
 			log.Printf("ssl reuse: %s geçerli letsencrypt cert bulundu — yeni LE çekimi ATLANDI (rate-limit korumasi)", alanAdi)
-			return cp, kp, nil
+			return cp, kp, true, nil
 		}
 	}
 
@@ -1012,10 +1028,11 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	args := []string{
 		"--issue",
 		"--webroot", "/var/www/_acme",
-		"-d", alanAdi,
-		"-d", "www." + alanAdi,
-		"--keylength", "2048",
 	}
+	for _, h := range wwwHostlar(alanAdi) {
+		args = append(args, "-d", h)
+	}
+	args = append(args, "--keylength", "2048")
 	if out, e := exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput(); e != nil {
 		// FAIL-SAFE (teardown YOK): mevcut/self-signed cert ile 443'ü KORU.
 		return sslFailSafe(alanAdi, sk, phpSurum, backend, "acme issue: "+strings.TrimSpace(string(out)))
@@ -1036,10 +1053,10 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 
 	yazCertKurulumu(sslDir, certPath, keyPath) // root-owned, cert 0644 / key 0600, cert_t
 	if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, certPath, keyPath, "letsencrypt"); e != nil {
-		return "", "", e
+		return "", "", false, e
 	}
 	removeHomeCert(sk, alanAdi)
-	return certPath, keyPath, nil
+	return certPath, keyPath, true, nil
 }
 
 // DisableSSL: vhost'u SSL'siz hale döndür, cert dosyalarını silme (ileride yeniden açılabilir)
