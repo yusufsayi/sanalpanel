@@ -39,14 +39,10 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// GÜVENLİK: bu uç noktanın hiç deneme sınırı yoktu (bkz. auth.TooManyFailedAttempts
-	// yorumu) — aynı IP-pencereli kilit burada da uygulanır.
+	// GÜVENLİK: kaba-kuvvet koruması router seviyesinde middleware.GirisLimiti ile
+	// yapılıyor (bkz. cmd/server/main.go) — bu route da /auth/login ile aynı
+	// IP-başına pencereli kilide tabi.
 	ip := httpx.ClientIP(r)
-	if auth.TooManyFailedAttempts(r.Context(), h.DB, "musteri.login", ip) {
-		httpx.WriteError(w, http.StatusTooManyRequests,
-			"çok fazla başarısız deneme — 15 dakika sonra tekrar deneyin")
-		return
-	}
 
 	// ftp_accounts'tan kontrol
 	var ftpID, domainID int64

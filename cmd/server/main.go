@@ -69,7 +69,18 @@ func main() {
 	}
 	d, err := db.Open(cfg.DBDsn)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		// Reboot/MariaDB gecikmesinde anında log.Fatalf ile ölmek yerine bekle+tekrar dene.
+		// systemd Restart=always ile panel, DB gelene kadar yeniden başlama döngüsüne
+		// girmeden ayakta kalır (StartLimitBurst tuzağını önler).
+		basla := time.Now()
+		for err != nil {
+			if time.Since(basla) >= 5*time.Minute {
+				log.Fatalf("db: 5dk boyunca bağlanılamadı (systemd yeniden başlatacak): %v", err)
+			}
+			log.Printf("db: bağlanılamadı, 3sn sonra tekrar denenecek: %v", err)
+			time.Sleep(3 * time.Second)
+			d, err = db.Open(cfg.DBDsn)
+		}
 	}
 	defer d.Close()
 
@@ -168,7 +179,11 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	// NOT: chimw.RealIP KULLANILMIYOR — spoof edilebilir X-Forwarded-For/X-Real-IP
+	// başlıklarını güvenilir-vekil kontrolü olmadan r.RemoteAddr'a yazıp giriş
+	// hız-sınırını atlatılabilir kılardı. Gerçek istemci IP'si httpx.ClientIP ile
+	// alınır; nginx zaten bu başlıkları yalnız kendi gördüğü gerçek bağlantı
+	// adresiyle üretir (bkz. assets/nginx/_panel.conf).
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(300 * time.Second))
 
@@ -187,8 +202,9 @@ func main() {
 	r.Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/login", authH.Login)
-		r.Post("/musteri/login", musteriH.Login)
+		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
+		r.With(middleware.GirisLimiti).Post("/auth/login", authH.Login)
+		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))

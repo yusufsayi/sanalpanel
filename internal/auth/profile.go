@@ -100,7 +100,11 @@ func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, "oturum yok")
 		return
 	}
-	secret := TOTPGenerateSecret()
+	secret, err := TOTPGenerateSecret()
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "secret üretilemedi")
+		return
+	}
 	uri := TOTPURI(secret, "root", "SanalPanel")
 	resp := map[string]any{
 		"secret":      secret,
