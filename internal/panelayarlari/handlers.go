@@ -142,8 +142,18 @@ func sslKur(domain string) (durum, hata, bitis string) {
 	_, _ = exec.Command("restorecon", "-R", acmeWebroot).CombinedOutput()
 
 	issueArgs := []string{"--issue", "--webroot", acmeWebroot, "-d", domain, "--keylength", "2048"}
-	if out, err := exec.Command(acmeBinYolu, issueArgs...).CombinedOutput(); err != nil {
-		return "basarisiz", strings.TrimSpace(string(out)), ""
+	issueCmd := exec.Command(acmeBinYolu, issueArgs...)
+	out, err := issueCmd.CombinedOutput()
+	if err != nil {
+		// acme.sh exit code 2 = RENEW_SKIP: store'da zaten gecerli (yenileme penceresine
+		// girmemis) bir sertifika var, YENIDEN CEKMEDI — bu GERCEK bir hata DEGIL. Bu
+		// durumu hata sayip vazgecmek, biraz once tenant SSL akisinda duzeltilen "sessizce
+		// self-signed'a dusme" hatasinin ayni sinifi: mevcut gecerli sertifikayla devam
+		// edip install-cert adimina gecilmeli.
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok || exitErr.ExitCode() != 2 {
+			return "basarisiz", strings.TrimSpace(string(out)), ""
+		}
 	}
 
 	// Orijinal self-signed'ı SADECE ilk seferde yedekle — sonraki domain değişikliklerinde
