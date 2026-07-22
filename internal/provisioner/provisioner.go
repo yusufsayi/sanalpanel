@@ -984,18 +984,21 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	certPath = filepath.Join(sslDir, alanAdi+".crt")
 	keyPath = filepath.Join(sslDir, alanAdi+".key")
 
-	// (1) Reuse-before-issue: geçerli cert varsa yeni çekimi ATLA.
-	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" {
+	// (1) Reuse-before-issue: yalnız GERÇEK (self-signed olmayan) geçerli bir Let's
+	// Encrypt cert varsa yeni çekimi ATLA. `real=false` (self-signed) burada ASLA
+	// reuse'a girmemeli — aksi halde EnableLetsEncrypt çağrısı (ör. kullanıcı DNS'i
+	// düzeltip self-signed'dan LE'ye yükseltmek istediğinde) sessizce no-op olur ve
+	// var olan self-signed cert'i "letsencrypt" etiketiyle yeniden dağıtarak başarı
+	// izlenimi verir (gerçek CA'dan hiç cert alınmaz). Bu, canlıda tam olarak
+	// gözlemlenen hataydı: sanalpanel.tr'de "tip":"letsencrypt" isteği ok:true
+	// dönüyordu ama sertifika dosyası hiç değişmiyordu.
+	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" && real {
 		if cp, kp, e := certiPkiyeKur(alanAdi, src, srcKey); e == nil {
-			kaynak := "self-signed"
-			if real {
-				kaynak = "letsencrypt"
-			}
-			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, kaynak); e != nil {
+			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, "letsencrypt"); e != nil {
 				return "", "", e
 			}
 			removeHomeCert(sk, alanAdi)
-			log.Printf("ssl reuse: %s geçerli %s cert bulundu — yeni LE çekimi ATLANDI (rate-limit korumasi)", alanAdi, kaynak)
+			log.Printf("ssl reuse: %s geçerli letsencrypt cert bulundu — yeni LE çekimi ATLANDI (rate-limit korumasi)", alanAdi)
 			return cp, kp, nil
 		}
 	}
