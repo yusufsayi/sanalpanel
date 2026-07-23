@@ -7,7 +7,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Routes: site kullanıcısı CLI'ının /api/cli/* uç noktaları. Sadece loopback-only
+// Routes: site kullanıcısı CLI'ının uç noktaları (/db/export, /db/import,
+// /cache/purge — path prefix yok, kök dizinde mount edilir). Sadece loopback-only
 // listener'a mount edilmeli (bkz. cmd/server/main.go) — dışarıya asla açılmamalı.
 func Routes(db *sql.DB) http.Handler {
 	h := &Handlers{DB: db}
