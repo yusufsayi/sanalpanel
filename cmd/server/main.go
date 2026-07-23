@@ -17,6 +17,7 @@ import (
 	"sanalpanel/internal/antivirus"
 	"sanalpanel/internal/auth"
 	"sanalpanel/internal/backups"
+	"sanalpanel/internal/cliapi"
 	"sanalpanel/internal/composer"
 	"sanalpanel/internal/config"
 	"sanalpanel/internal/cron"
@@ -442,6 +443,15 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	cliSrv := &http.Server{
+		Addr:              cfg.CLIListenAddr,
+		Handler:           cliapi.Routes(d),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Minute, // buyuk db:import upload'lari icin genis ust sinir
+		WriteTimeout:      10 * time.Minute, // buyuk db:export indirmeleri icin genis ust sinir
+		IdleTimeout:       60 * time.Second,
+	}
+
 	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
 	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
 	if err := guvenlikduvari.Reapply(d); err != nil {
@@ -459,6 +469,13 @@ func main() {
 		}
 	}()
 
+	go func() {
+		log.Printf("sanalpanel CLI API — %s üzerinde dinleniyor (loopback-only)", cfg.CLIListenAddr)
+		if err := cliSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("cli listen: %v", err)
+		}
+	}()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
@@ -467,6 +484,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if err := cliSrv.Shutdown(ctx); err != nil {
+		log.Printf("cli shutdown: %v", err)
 	}
 }
 

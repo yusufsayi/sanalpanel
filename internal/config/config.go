@@ -8,19 +8,21 @@ import (
 )
 
 type Config struct {
-	ListenAddr  string
-	DBDsn       string
-	JWTSecret   []byte
-	JWTLifetime int // saniye
-	Env         string
+	ListenAddr    string
+	CLIListenAddr string
+	DBDsn         string
+	JWTSecret     []byte
+	JWTLifetime   int // saniye
+	Env           string
 }
 
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:  envOr("PANEL_LISTEN", ":8080"),
-		DBDsn:       envOr("PANEL_DB_DSN", "panel:panelpw@unix(/var/lib/mysql/mysql.sock)/panel?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"),
-		Env:         envOr("PANEL_ENV", "production"),
-		JWTLifetime: envInt("PANEL_JWT_LIFETIME_SEC", 8*3600),
+		ListenAddr:    envOr("PANEL_LISTEN", ":8080"),
+		CLIListenAddr: envOr("PANEL_CLI_LISTEN", "127.0.0.1:8090"),
+		DBDsn:         envOr("PANEL_DB_DSN", "panel:panelpw@unix(/var/lib/mysql/mysql.sock)/panel?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"),
+		Env:           envOr("PANEL_ENV", "production"),
+		JWTLifetime:   envInt("PANEL_JWT_LIFETIME_SEC", 8*3600),
 	}
 	secret := strings.TrimSpace(os.Getenv("PANEL_JWT_SECRET"))
 	if len(secret) < 32 {
