@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -64,6 +65,28 @@ func enableUser(sk, pass string) error {
 func disableUser(sk string) {
 	_, _ = cli("ACL", "DELUSER", sk)
 	_, _ = cli("ACL", "SAVE")
+}
+
+// PurgeSK: bu domain'e ait TUM ~sk:* redis key'lerini siler (cache:purge CLI komutu icin).
+// Admin yetkisiyle calisir (tenant'in kendi ACL parolasina ihtiyac yok).
+func PurgeSK(sk string) (int, error) {
+	if !reSK.MatchString(sk) {
+		return 0, fmt.Errorf("geçersiz sistem kullanıcısı: %s", sk)
+	}
+	out, err := cli("--scan", "--pattern", sk+":*")
+	if err != nil {
+		return 0, err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return 0, nil
+	}
+	keys := strings.Split(out, "\n")
+	args := append([]string{"DEL"}, keys...)
+	if _, err := cli(args...); err != nil {
+		return 0, err
+	}
+	return len(keys), nil
 }
 
 // ---- WordPress otomatik bağlama (wp-cli, domain kullanıcısı olarak) ----
