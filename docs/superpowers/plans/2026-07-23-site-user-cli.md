@@ -982,7 +982,7 @@ HEMEN ÜSTÜNE ekle:
 # sanalpanel: site kullanicisi icin kisa komutlar (CloudPanel clpctl esdegeri)
 set -euo pipefail
 
-CLI_API="http://127.0.0.1:8090/api/cli"
+CLI_API="http://127.0.0.1:8090"
 TOKEN_FILE="$HOME/.sanalpanel/token"
 
 usage() {
