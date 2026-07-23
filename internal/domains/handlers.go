@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"sanalpanel/internal/cliapi"
 	"sanalpanel/internal/dns"
 	"sanalpanel/internal/hesaplar"
 	"sanalpanel/internal/httpx"
@@ -228,6 +229,13 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	dbPass := hesaplar.RandomParola(24)
 	if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
 		log.Printf("MySQL create %q hata: %v", dbName, err)
+	}
+
+	// 4b) Site kullanıcısı CLI token'ı (db:export/import, cache:purge komutları için)
+	if cliToken, err := cliapi.GenerateToken(h.DB, id); err != nil {
+		log.Printf("CLI token oluştur %q hata: %v", pr.SistemKullanici, err)
+	} else if err := cliapi.WriteTokenFile(pr.SistemKullanici, cliToken, uidN, gidN); err != nil {
+		log.Printf("CLI token dosyası yaz %q hata: %v", pr.SistemKullanici, err)
 	}
 
 	// 5) DNS şablonu otomatik tohumla + BIND zone yaz + reload
