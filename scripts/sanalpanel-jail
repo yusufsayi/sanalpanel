@@ -53,6 +53,93 @@ build_template() {
   echo "root:x:0:" > "$TEMPLATE/etc/group"
   echo "127.0.0.1 localhost" > "$TEMPLATE/etc/hosts"
   printf 'export PS1="[\\u@%s \\W]\\$ "\nexport PATH=/bin:/usr/bin\nexport TERM=${TERM:-xterm}\numask 022\n' "sanal-jail" > "$TEMPLATE/etc/profile"
+  # sanalpanel CLI dispatcher (CloudPanel clpctl esdegeri site-kullanicisi komutlari)
+  cat > "$TEMPLATE/usr/bin/sanalpanel" <<'CLIEOF'
+#!/bin/bash
+# sanalpanel: site kullanicisi icin kisa komutlar (CloudPanel clpctl esdegeri)
+set -euo pipefail
+
+CLI_API="http://127.0.0.1:8090"
+TOKEN_FILE="$HOME/.sanalpanel/token"
+
+usage() {
+  echo "kullanım: sanalpanel <komut> [--flag=değer ...]"
+  echo "komutlar: db:export db:import permissions:reset cache:purge"
+  exit 1
+}
+
+token() {
+  [ -r "$TOKEN_FILE" ] || { echo "HATA: token dosyası okunamadı: $TOKEN_FILE" >&2; exit 1; }
+  cat "$TOKEN_FILE"
+}
+
+parse_flag() {
+  local name="$1"; shift
+  for arg in "$@"; do
+    case "$arg" in
+      "$name"=*) printf '%s' "${arg#"$name"=}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+cmd="${1:-}"; shift || true
+
+case "$cmd" in
+  permissions:reset)
+    dirs="770"; files="660"; path="."
+    d=$(parse_flag --directories "$@") && dirs="$d"
+    f=$(parse_flag --files "$@") && files="$f"
+    p=$(parse_flag --path "$@") && path="$p"
+    find "$path" -type d -exec chmod "$dirs" {} +
+    find "$path" -type f -exec chmod "$files" {} +
+    echo "izinler sıfırlandı: dizinler=$dirs dosyalar=$files yol=$path"
+    ;;
+  db:export)
+    dbName=$(parse_flag --databaseName "$@") || { echo "HATA: --databaseName gerekli" >&2; exit 1; }
+    file=$(parse_flag --file "$@") || { echo "HATA: --file gerekli" >&2; exit 1; }
+    http_code=$(curl -sS -o "$file" -w '%{http_code}' \
+      -H "Authorization: Bearer $(token)" \
+      -G --data-urlencode "databaseName=$dbName" --data-urlencode "file=$file" \
+      "$CLI_API/db/export")
+    if [ "$http_code" != "200" ]; then
+      echo "HATA: export başarısız (HTTP $http_code)" >&2; cat "$file" >&2; rm -f "$file"; exit 1
+    fi
+    echo "dışa aktarıldı: $file"
+    ;;
+  db:import)
+    dbName=$(parse_flag --databaseName "$@") || { echo "HATA: --databaseName gerekli" >&2; exit 1; }
+    file=$(parse_flag --file "$@") || { echo "HATA: --file gerekli" >&2; exit 1; }
+    [ -r "$file" ] || { echo "HATA: dosya okunamadı: $file" >&2; exit 1; }
+    resp=$(curl -sS -w '\n%{http_code}' \
+      -H "Authorization: Bearer $(token)" \
+      --data-binary "@$file" \
+      "$CLI_API/db/import?databaseName=$dbName")
+    http_code=$(printf '%s' "$resp" | tail -n1)
+    body=$(printf '%s' "$resp" | sed '$d')
+    if [ "$http_code" != "200" ]; then
+      echo "HATA: import başarısız (HTTP $http_code): $body" >&2; exit 1
+    fi
+    echo "içe aktarıldı: $file"
+    ;;
+  cache:purge)
+    purge=$(parse_flag --purge "$@") || purge="all"
+    resp=$(curl -sS -w '\n%{http_code}' \
+      -H "Authorization: Bearer $(token)" \
+      -X POST --data-urlencode "purge=$purge" \
+      "$CLI_API/cache/purge")
+    http_code=$(printf '%s' "$resp" | tail -n1)
+    body=$(printf '%s' "$resp" | sed '$d')
+    if [ "$http_code" != "200" ]; then
+      echo "HATA: cache purge başarısız (HTTP $http_code): $body" >&2; exit 1
+    fi
+    echo "$body"
+    ;;
+  *) usage ;;
+esac
+CLIEOF
+  chmod 755 "$TEMPLATE/usr/bin/sanalpanel"
+
   chown -R root:root "$TEMPLATE"
   echo "template OK: $TEMPLATE ($(du -sh "$TEMPLATE" 2>/dev/null | cut -f1))"
 }
