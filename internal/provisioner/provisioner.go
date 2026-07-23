@@ -312,7 +312,8 @@ server {
         fastcgi_param HTTPS on;
         fastcgi_read_timeout 60s;
         # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
-{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache sanalcache;
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache_key "$scheme$request_method$host$request_uri:{{.CacheVersion}}";
+        fastcgi_cache sanalcache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -393,7 +394,8 @@ server {
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_read_timeout 60s;
         # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
-{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache sanalcache;
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache_key "$scheme$request_method$host$request_uri:{{.CacheVersion}}";
+        fastcgi_cache sanalcache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -578,6 +580,7 @@ type VhostOpts struct {
 	FastCgiCacheDakika int
 	BrowserCache       bool
 	BrowserCacheGun    int
+	CacheVersion       int // cache:purge CLI komutuyla artan sayaç; fastcgi_cache_key'e gömülür
 
 	// Kullanici ek direktifleri
 	EkDirektifler string
@@ -1406,11 +1409,11 @@ func welcomeHTML(domain string) string {
 // PHP versiyonu/socket degisikliklerinden sonra cagrilir; SSL bilgilerini DB'den okur.
 func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error {
 	var alanAdi, sk, certPath, keyPath, sslKaynak, backend string
-	var askida int
+	var askida, cacheVersion int
 	if err := db.QueryRow(
-		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm'), COALESCE(askida,0)
+		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm'), COALESCE(askida,0), COALESCE(cache_version,0)
 		 FROM domains WHERE id=?`, domainID).
-		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida); err != nil {
+		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida, &cacheVersion); err != nil {
 		return fmt.Errorf("domain bilgi cek: %w", err)
 	}
 	// 🔴 Per-tenant FPM (Seçenek A) aktifse socket'i DAİMA per-tenant socket'e zorla —
@@ -1433,6 +1436,7 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 		SSLKaynak:       sslKaynak,
 		Backend:         backend,
 		Askida:          askida == 1, // askıdaysa her render'da 503 vhost'u tekrar uygulanır
+		CacheVersion:    cacheVersion,
 		HdrXContentType: true, HdrXXSS: true, HdrReferrer: true,
 		HdrPermissions: true, HdrCSPUpgrade: true, HdrHSTS: true,
 		HSTSMaxAge: 31536000, HSTSSubdomains: true, HSTSPreload: false,
