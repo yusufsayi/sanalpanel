@@ -118,6 +118,10 @@ func HealCacheZoneOnStartup() {
 func ensureCacheZone() (changed bool, err error) {
 	// cache disk dizinini garanti et (nginx worker yazabilsin diye nginx sahipliği).
 	_ = os.MkdirAll(cacheZoneDir, 0700)
+	// MkdirAll üst dizini (/var/cache/nginx) de aynı 0700 modla root:root oluşturabilir —
+	// bu durumda nginx worker (uid nginx) alt dizine erişmek için gereken traverse (x)
+	// hakkına sahip olmaz ve fastcgi_cache "Permission denied" ile başarısız olur.
+	_ = os.Chmod(filepath.Dir(cacheZoneDir), 0755)
 	if uid, gid, e := uidGid("nginx"); e == nil {
 		_ = os.Chown(cacheZoneDir, uid, gid)
 	}

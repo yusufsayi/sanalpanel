@@ -6,7 +6,7 @@
 #
 # assets/ dizini bu script'in yanında olmalı:
 #   sanalpanel-server  sanalpanel-seed-admin  frontend-dist.tar.gz
-#   migrations.tar.gz  nginx/*  php-fpm/*  phpmyadmin/*  systemd/*  ops/*
+#   migrations.tar.gz  nginx/*  php-fpm/*  phpmyadmin/*  systemd/*  ops/*  ssh/*
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -125,7 +125,8 @@ ok "panel DB + kullanıcı (panel@127.0.0.1)"
 # ============ 5) DİZİNLER + ENV ============
 step "5) Dizinler + env"
 mkdir -p /opt/sanalpanel/bin /opt/sanalpanel/frontend-dist /opt/sanalpanel/src/migrations \
-         /opt/sanalpanel/src/mail-templates /opt/sanalpanel/pma-signon /etc/sanalpanel /etc/ssl/sanalpanel
+         /opt/sanalpanel/src/mail-templates /opt/sanalpanel/src/scripts /opt/sanalpanel/pma-signon \
+         /etc/sanalpanel /etc/ssl/sanalpanel
 JWT=$(openssl rand -hex 32); RADMIN=$(openssl rand -hex 24)
 cat > /etc/sanalpanel/env <<ENV
 PANEL_LISTEN=127.0.0.1:8080
@@ -153,6 +154,10 @@ for t in "$A"/ops/*; do
 done
 cp "$A/ops/"* /opt/sanalpanel/src/scripts/ 2>/dev/null
 ok "ops-tool'lar (/usr/local/bin: update, optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
+# sshaccess.EnsureInfra bunu /opt/sanalpanel/src/scripts/50-sanal-jail.conf'tan okuyup
+# /etc/ssh/sshd_config.d/'e uygular (panel açılışında, idempotent) — burada sadece kaynağı yerleştiriyoruz.
+[ -f "$A/ssh/50-sanal-jail.conf" ] && install -m 0644 "$A/ssh/50-sanal-jail.conf" /opt/sanalpanel/src/scripts/50-sanal-jail.conf \
+  && ok "SSH jail sshd_config şablonu (/opt/sanalpanel/src/scripts)"
 
 # ============ 7) PANEL SSL (self-signed) ============
 step "7) Panel SSL (:8443 self-signed)"
