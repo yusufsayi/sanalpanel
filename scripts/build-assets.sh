@@ -24,8 +24,9 @@ export GOOS=linux
 export GOARCH=amd64
 export GOAMD64=v1
 
-echo "== sanalpanel-server derleniyor (GOAMD64=$GOAMD64, CGO_ENABLED=$CGO_ENABLED) =="
-go build -o assets/sanalpanel-server ./cmd/server
+BUILD_TARIHI="$(date -u +%Y-%m-%d)"
+echo "== sanalpanel-server derleniyor (GOAMD64=$GOAMD64, CGO_ENABLED=$CGO_ENABLED, build_tarihi=$BUILD_TARIHI) =="
+go build -ldflags "-X main.buildDate=$BUILD_TARIHI" -o assets/sanalpanel-server ./cmd/server
 
 # seed-admin: scripts/seed_admin.go içinde //go:build ignore var → dosyayı doğrudan derle.
 if [ -f scripts/seed_admin.go ]; then

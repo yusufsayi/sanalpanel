@@ -8,7 +8,7 @@ import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
 
 const SURUM_UYARI_KAPALI_KEY = 'sp-surum-duyuru-kapatildi'
-type SurumKontrol = { guncelleme_var: boolean; kritik: boolean; duyuru: string; son: string }
+type SurumKontrol = { guncelleme_var: boolean; kritik: boolean; duyuru: string; son: string; mevcut?: string; build_tarihi?: string }
 
 type NavItem = { to: string; etiket: string; ikon: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -250,8 +250,14 @@ export default function DashboardLayout() {
           </div>
         )}
 
-        <main className="flex-1 min-w-0 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0">
-          <Outlet />
+        <main className="flex-1 min-w-0 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0 flex flex-col">
+          <div className="flex-1 min-w-0">
+            <Outlet />
+          </div>
+          <footer className="py-4 text-center text-xs text-slate-400 dark:text-slate-600">
+            SanalPanel {surum?.mevcut ? `v${surum.mevcut}` : ''}
+            {surum?.build_tarihi ? ` · Build: ${surum.build_tarihi}` : ''}
+          </footer>
         </main>
       </div>
 

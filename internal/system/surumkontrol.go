@@ -56,12 +56,13 @@ type surumOnbellek struct {
 }
 
 var (
-	surumMu     sync.RWMutex
-	surumYayin  SurumYayin
-	surumSon    time.Time
-	surumHata   string
-	surumMevcut string
-	surumAcik   bool
+	surumMu          sync.RWMutex
+	surumYayin       SurumYayin
+	surumSon         time.Time
+	surumHata        string
+	surumMevcut      string
+	surumBuildTarihi string
+	surumAcik        bool
 )
 
 // surumKontrolAcikMi — PANEL_SURUM_KONTROL=0 ise tamamen kapalı.
@@ -98,9 +99,10 @@ func KurulumKimligi() string {
 }
 
 // SurumBaslat — arka plan sürüm kontrolünü başlatır. Kapalıysa hiç çalışmaz.
-func SurumBaslat(mevcutSurum string) {
+func SurumBaslat(mevcutSurum, buildTarihi string) {
 	surumMu.Lock()
 	surumMevcut = mevcutSurum
+	surumBuildTarihi = buildTarihi
 	surumAcik = surumKontrolAcikMi()
 	surumMu.Unlock()
 
@@ -234,6 +236,7 @@ func SurumKontrolYenile(w http.ResponseWriter, r *http.Request) {
 func SurumKontrolDurum(w http.ResponseWriter, r *http.Request) {
 	surumMu.RLock()
 	mevcut, y, son, hata, acik := surumMevcut, surumYayin, surumSon, surumHata, surumAcik
+	buildTarihi := surumBuildTarihi
 	surumMu.RUnlock()
 
 	// Kasıtlı olarak SADECE eşitlik kıyası: sürüm etiketleri "0.3.0-f2" gibi
@@ -245,6 +248,7 @@ func SurumKontrolDurum(w http.ResponseWriter, r *http.Request) {
 	cevap := map[string]any{
 		"acik":           acik,
 		"mevcut":         mevcut,
+		"build_tarihi":   buildTarihi,
 		"son":            y.SonSurum,
 		"guncelleme_var": guncellemeVar,
 		"duyuru":         y.Duyuru,

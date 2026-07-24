@@ -65,6 +65,10 @@ import (
 
 const version = "0.3.0-f2"
 
+// buildDate — derleme zamanında ldflags ile gömülür (bkz. scripts/build-assets.sh:
+// -X main.buildDate=...). Kaynağından `go build` ile elle derlenirse "gelistirme" kalır.
+var buildDate = "gelistirme"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -478,7 +482,7 @@ func main() {
 
 	// Sürüm kontrolü + güvenlik duyuru kanalı. PANEL_SURUM_KONTROL=0 ile kapalı;
 	// kapalıyken hiç ağ isteği atılmaz (bkz. internal/system/surumkontrol.go).
-	system.SurumBaslat(version)
+	system.SurumBaslat(version, buildDate)
 
 	go func() {
 		log.Printf("sanalpanel %s — %s üzerinde dinleniyor (env=%s)", version, cfg.ListenAddr, cfg.Env)
