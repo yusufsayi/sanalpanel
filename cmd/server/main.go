@@ -22,6 +22,7 @@ import (
 	"sanalpanel/internal/cron"
 	"sanalpanel/internal/db"
 	"sanalpanel/internal/dns"
+	"sanalpanel/internal/domainek"
 	"sanalpanel/internal/domains"
 	"sanalpanel/internal/eklenti"
 	"sanalpanel/internal/files"
@@ -169,6 +170,7 @@ func main() {
 	wafH := &waf.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
+	ekH := &domainek.Handlers{DB: d, IPv4: ipv4}
 	mailH := &mail.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	mail.EnsureInfra()
@@ -312,6 +314,12 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/ssl", subH.SSLDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKaldir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek", ekH.Liste)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ek", ekH.Olustur)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ek/{ekid}", ekH.Sil)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/yonlendirme", domainsH.YonlendirmeDurum)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/yonlendirme", domainsH.YonlendirmeAyarla)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/yonlendirme", domainsH.YonlendirmeKaldir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/web-backend", domainsH.GetWebBackend)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-backend", domainsH.SetWebBackend)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)

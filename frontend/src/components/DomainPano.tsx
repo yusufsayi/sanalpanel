@@ -24,6 +24,7 @@ const ICONS = {
   ssh:       'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
   wordpress: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 3-6 3-9s-.5-6.5-3-9m0 18c-2.5-2.5-3-6-3-9s.5-6.5 3-9M3.6 9h16.8M3.6 15h16.8',
   subdomain: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064',
+  ekdomain:  'M9 12h6m-6 4h3m-3-8h6M5 6h14a1 1 0 011 1v10a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1z',
   dns:       'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   redis:     'M13 10V3L4 14h7v7l9-11h-7z',
   waf:       'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
@@ -51,6 +52,7 @@ export default function DomainPano({ domain }: { domain: Domain }) {
       <Grup baslik="Alan Adı ve DNS">
         <ToolCard etiket="DNS Yönetimi"          aciklama="A, MX, TXT, CNAME kayıtları" ikon={ICONS.dns}       renk="sky"  onClick={git('dns')} />
         <ToolCard etiket="Subdomainler"          aciklama="Alt alan adları"   ikon={ICONS.subdomain} renk="teal" onClick={git('subdomainler')} />
+        <ToolCard etiket="Ek Alan Adları"        aciklama="Addon/parked domain · yönlendirme" ikon={ICONS.ekdomain} renk="indigo" onClick={git('ek-alanlar')} />
       </Grup>
 
       <Grup baslik="E-posta">
