@@ -280,6 +280,7 @@ server {
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
 {{.ModSec}}{{.DenyBlocks}}
+{{.IPKurallari}}{{.HotlinkLocation}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -363,6 +364,7 @@ server {
     }
 
 {{.DenyBlocks}}
+{{.IPKurallari}}{{.HotlinkLocation}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -529,6 +531,49 @@ server {
 }
 {{end}}`))
 
+// redirectVhostTmpl: domain_redirects'te tüm-domain yönlendirme tanımlıysa (ve Askida/
+// vhost_ozel devrede değilse) render edilir. HTTP her zaman hedefe yönlendirir; SSL
+// varsa 443 de aynı şekilde (sertifika zaten kurulu, browser hata vermeden yönlendirir).
+var redirectVhostTmpl = template.Must(template.New("r").Parse(`# {{.AlanAdi}} — SanalPanel yönlendirmesi: {{.RedirectHedef}}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{.SunucuAdlari}};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/_acme;
+        auth_basic off;
+        try_files $uri =404;
+    }
+
+    access_log /var/log/nginx/{{.AlanAdi}}.access.log;
+    error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
+
+    location / {
+        return {{.RedirectKod}} {{.RedirectHedef}}$request_uri;
+    }
+}
+{{if .SSL}}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{.SunucuAdlari}};
+
+    ssl_certificate     {{.CertPath}};
+    ssl_certificate_key {{.KeyPath}};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    access_log /var/log/nginx/{{.AlanAdi}}.access.log;
+    error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
+
+    location / {
+        return {{.RedirectKod}} {{.RedirectHedef}}$request_uri;
+    }
+}
+{{end}}`))
+
 // phpPoolTmpl: per-tenant php-fpm pool. Guvenlik degerleri php_admin_value ile
 // verilir → kullanici PHP kodu ini_set/php_value ile EZEMEZ. open_basedir dosya
 // erisimini tenant home + /tmp ile sinirlar (baska tenant/sistem dosyalarini okuyamaz).
@@ -591,10 +636,18 @@ type VhostOpts struct {
 	// Askida true ise normal vhost yerine 503 "askıya alındı" vhost'u render edilir.
 	Askida bool
 
+	// RedirectHedef doluysa (ve Askida/vhost_ozel devrede değilse) normal vhost yerine
+	// tüm istekleri RedirectHedef'e yönlendiren basit bir vhost render edilir (bkz.
+	// domain_redirects tablosu). Öncelik: Askida > vhost_ozel > Redirect > normal.
+	RedirectHedef string
+	RedirectKod   int
+
 	// Render-time hesaplanan alanlar (DB'de TUTULMAZ). renderAndReload icinde set edilir.
-	SecHeaders string // guvenlik add_header blogu (her location'a enjekte edilir)
-	DenyBlocks string // CGI/betik + yedek/dump dosya deny location'lari
-	ModSec     string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
+	SecHeaders      string // guvenlik add_header blogu (her location'a enjekte edilir)
+	DenyBlocks      string // CGI/betik + yedek/dump dosya deny location'lari
+	ModSec          string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
+	IPKurallari     string // server-context allow/deny blogu; kapaliysa ""
+	HotlinkLocation string // resim uzantilari icin valid_referers location'u; kapaliysa ""
 }
 
 func (o VhostOpts) SSL() bool {
@@ -694,9 +747,13 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	// Askıya-alma tutarlılığı: opts açıkça askıda demese bile DB'de bu kullanıcının
 	// domaini askıdaysa, HER render'ı 503 vhost'u olarak zorla. Bu sayede SetPHP/SSL/
 	// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
+	// ana_domain_id IS NULL: sk bir addon/parked domain ile paylaşılıyor olabilir
+	// (bkz. 0045_domain_ek.sql) — bu satır olmadan QueryRow, sk'yi paylaşan birden
+	// fazla domains satırından TANIMSIZ birini seçer (ana hesabın askı durumu yerine
+	// yanlışlıkla bir addon'unkini uygulayabilir).
 	if !opts.Askida && pkgDB != nil {
 		var ak int
-		_ = pkgDB.QueryRow(`SELECT COALESCE(askida,0) FROM domains WHERE sistem_kullanici=?`, sk).Scan(&ak)
+		_ = pkgDB.QueryRow(`SELECT COALESCE(askida,0) FROM domains WHERE sistem_kullanici=? AND ana_domain_id IS NULL`, sk).Scan(&ak)
 		if ak == 1 {
 			opts.Askida = true
 		}
@@ -714,10 +771,28 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	if !opts.Askida && pkgDB != nil {
 		var ozel int
 		var icerik sql.NullString
-		_ = pkgDB.QueryRow(`SELECT COALESCE(vhost_ozel,0), vhost_ozel_icerik FROM domains WHERE sistem_kullanici=?`, sk).
+		_ = pkgDB.QueryRow(`SELECT COALESCE(vhost_ozel,0), vhost_ozel_icerik FROM domains WHERE sistem_kullanici=? AND ana_domain_id IS NULL`, sk).
 			Scan(&ozel, &icerik)
 		if ozel == 1 && icerik.Valid && strings.TrimSpace(icerik.String) != "" {
 			ozelIcerik = icerik.String
+		}
+	}
+
+	// Tüm-domain yönlendirme: askıda DEĞİLSE ve özel-vhost YOKSA, domain_redirects'te
+	// bu sk'nin (yalnızca ana domain satırı — bkz. ana_domain_id guard) bir hedefi varsa
+	// normal vhost yerine redirectVhostTmpl render edilir. Askida/ozelIcerik ile aynı
+	// "her render'da DB'den zorla" deseni — SSL yenileme, PHP sürüm değişimi gibi diğer
+	// ~28 çağrı noktası da yönlendirmeyi otomatik korur.
+	if !opts.Askida && ozelIcerik == "" && pkgDB != nil {
+		var hedef string
+		var kod int
+		err := pkgDB.QueryRow(
+			`SELECT r.hedef_url, r.kod FROM domain_redirects r
+			 JOIN domains d ON d.id = r.domain_id
+			 WHERE d.sistem_kullanici=? AND d.ana_domain_id IS NULL`, sk).Scan(&hedef, &kod)
+		if err == nil && strings.TrimSpace(hedef) != "" {
+			opts.RedirectHedef = hedef
+			opts.RedirectKod = kod
 		}
 	}
 
@@ -734,10 +809,14 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		// modsec conf dosyasini da tazeler → tek kaynak: her render self-healing.
 		if !opts.Askida {
 			opts.ModSec = buildModSec(sk)
+			opts.IPKurallari = buildIPRules(sk)
+			opts.HotlinkLocation = buildHotlink(sk, opts.AlanAdi)
 		}
 		tmpl := vhostTmpl
 		if opts.Askida {
 			tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
+		} else if opts.RedirectHedef != "" {
+			tmpl = redirectVhostTmpl // yönlendirme tanımlıysa
 		}
 		if err := tmpl.Execute(&buf, opts); err != nil {
 			return fmt.Errorf("template render: %w", err)

@@ -66,7 +66,7 @@ func WAFEfektif(db *sql.DB, sk string) (aktif bool, engine string, paranoya int)
 		`SELECT d.waf_enabled, d.waf_mode, d.waf_paranoia,
 		        COALESCE(p.waf_enabled,0), COALESCE(p.waf_mode,'on'), COALESCE(p.waf_paranoia,1)
 		 FROM domains d LEFT JOIN service_plans p ON p.id = d.plan_id
-		 WHERE d.sistem_kullanici = ?`, sk).
+		 WHERE d.sistem_kullanici = ? AND d.ana_domain_id IS NULL`, sk).
 		Scan(&dEn, &dMode, &dPL, &pEn, &pMode, &pPL)
 	if err != nil {
 		return false, "", paranoya

@@ -14,6 +14,7 @@ import (
 
 	"sanalpanel/internal/cliapi"
 	"sanalpanel/internal/dns"
+	"sanalpanel/internal/domainek"
 	"sanalpanel/internal/hesaplar"
 	"sanalpanel/internal/httpx"
 	"sanalpanel/internal/kaynaklimit"
@@ -259,9 +260,10 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var alanAdi, sk string
 	var isDemo int
+	var anaDomainID sql.NullInt64
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alan_adi, sistem_kullanici, is_demo FROM domains WHERE id=?`, id).
-		Scan(&alanAdi, &sk, &isDemo)
+		`SELECT alan_adi, sistem_kullanici, is_demo, ana_domain_id FROM domains WHERE id=?`, id).
+		Scan(&alanAdi, &sk, &isDemo, &anaDomainID)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -269,6 +271,42 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma hatası: "+err.Error())
 		return
+	}
+
+	// Bu domain bir ek alan adıysa (addon/parked, sk'yi ana hesapla PAYLAŞIYOR),
+	// aşağıdaki sk-genelindeki yıkıcı adımlara (Deprovision/SystemdSliceSil/
+	// redis.KapatDomain) ASLA girmemeli — bunlar ana hesabın TÜM Linux kullanıcısını
+	// silerdi. domainek.DeleteEkDomain kendi (nginx conf + docroot + DNS zone + DB) temizliğini
+	// yapar ve döner.
+	if anaDomainID.Valid {
+		if err := domainek.DeleteEkDomain(r.Context(), h.DB, id, anaDomainID.Int64); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+err.Error())
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"silinen": map[string]string{"alan_adi": alanAdi, "sistem_kullanici": sk},
+		})
+		return
+	}
+
+	// Ana domain siliniyor: altındaki ek alan adlarını (varsa) ÖNCE temizle — DB'de
+	// FK CASCADE kasıtlı olarak yok (bkz. 0045 migration notu), aksi halde bunların
+	// nginx conf/docroot/DNS zone dosyaları diskte öksüz kalırdı.
+	if childRows, err := h.DB.QueryContext(r.Context(), `SELECT id FROM domains WHERE ana_domain_id=?`, id); err == nil {
+		var childIDs []int64
+		for childRows.Next() {
+			var cid int64
+			if childRows.Scan(&cid) == nil {
+				childIDs = append(childIDs, cid)
+			}
+		}
+		childRows.Close()
+		for _, cid := range childIDs {
+			if err := domainek.DeleteEkDomain(r.Context(), h.DB, cid, id); err != nil {
+				log.Printf("ek alan adı silme uyarısı (domain_id=%d, ek=%d): %v", id, cid, err)
+			}
+		}
 	}
 
 	if isDemo == 0 {

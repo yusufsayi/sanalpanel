@@ -23,6 +23,7 @@ import (
 	"sanalpanel/internal/cron"
 	"sanalpanel/internal/db"
 	"sanalpanel/internal/dns"
+	"sanalpanel/internal/domainek"
 	"sanalpanel/internal/domains"
 	"sanalpanel/internal/eklenti"
 	"sanalpanel/internal/files"
@@ -170,6 +171,7 @@ func main() {
 	wafH := &waf.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
+	ekH := &domainek.Handlers{DB: d, IPv4: ipv4}
 	mailH := &mail.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	mail.EnsureInfra()
@@ -272,6 +274,10 @@ func main() {
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/mail/{mid}", mailH.Sil)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/mail/{mid}/parola", mailH.ParolaSifirla)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/mail/{mid}/durum", mailH.DurumDegistir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/mail/aliases", mailH.AliasListe)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/mail/aliases", mailH.AliasEkle)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/mail/aliases/{aid}", mailH.AliasSil)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/mail/aliases/{aid}/durum", mailH.AliasDurumDegistir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/koruma", korumaH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/koruma", korumaH.Ekle)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/koruma/{kid}", korumaH.Sil)
@@ -309,6 +315,18 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/ssl", subH.SSLDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKaldir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek", ekH.Liste)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ek", ekH.Olustur)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ek/{ekid}", ekH.Sil)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/yonlendirme", domainsH.YonlendirmeDurum)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/yonlendirme", domainsH.YonlendirmeAyarla)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/yonlendirme", domainsH.YonlendirmeKaldir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/hotlink", domainsH.HotlinkDurum)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/hotlink", domainsH.HotlinkAyarla)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ip-kurallari", domainsH.IPKurallariListe)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/ip-kurallari/mod", domainsH.IPKurallariModAyarla)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ip-kurallari", domainsH.IPKuralEkle)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ip-kurallari/{kid}", domainsH.IPKuralSil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/web-backend", domainsH.GetWebBackend)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-backend", domainsH.SetWebBackend)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
