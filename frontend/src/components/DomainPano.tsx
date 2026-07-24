@@ -28,6 +28,7 @@ const ICONS = {
   dns:       'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   redis:     'M13 10V3L4 14h7v7l9-11h-7z',
   waf:       'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  erisim:    'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z',
   posta:     'M3 8l9 6 9-6m-9 6V4m0 0v16',
 }
 
@@ -89,6 +90,7 @@ export default function DomainPano({ domain }: { domain: Domain }) {
           onClick={git('ssl')}
         />
         <ToolCard etiket="WAF (Güvenlik Duvarı)"   aciklama="ModSecurity + OWASP CRS" ikon={ICONS.waf} renk="emerald" onClick={git('waf')} />
+        <ToolCard etiket="Erişim Kontrolü"          aciklama="Hotlink koruması · IP izin/engel" ikon={ICONS.erisim} renk="rose" onClick={git('erisim-kontrol')} />
         <ToolCard etiket="Şifre Korumalı Dizinler" aciklama=".htpasswd"       ikon={ICONS.kilit}      renk="amber" faz="F7" onClick={git('sifre-koruma')} />
         <ToolCard etiket="İstatistikler"            aciklama="Trafik analizi"  ikon={ICONS.istatistik} renk="indigo" faz="F10" onClick={git('istatistik')} />
         <ToolCard etiket="Imunify"                  aciklama="Antivirüs"        ikon={ICONS.imunify}    renk="emerald" onClick={git('imunify')} />

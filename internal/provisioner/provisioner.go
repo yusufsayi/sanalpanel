@@ -280,6 +280,7 @@ server {
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
 {{.ModSec}}{{.DenyBlocks}}
+{{.IPKurallari}}{{.HotlinkLocation}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -362,6 +363,7 @@ server {
     }
 
 {{.DenyBlocks}}
+{{.IPKurallari}}{{.HotlinkLocation}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -638,9 +640,11 @@ type VhostOpts struct {
 	RedirectKod   int
 
 	// Render-time hesaplanan alanlar (DB'de TUTULMAZ). renderAndReload icinde set edilir.
-	SecHeaders string // guvenlik add_header blogu (her location'a enjekte edilir)
-	DenyBlocks string // CGI/betik + yedek/dump dosya deny location'lari
-	ModSec     string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
+	SecHeaders      string // guvenlik add_header blogu (her location'a enjekte edilir)
+	DenyBlocks      string // CGI/betik + yedek/dump dosya deny location'lari
+	ModSec          string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
+	IPKurallari     string // server-context allow/deny blogu; kapaliysa ""
+	HotlinkLocation string // resim uzantilari icin valid_referers location'u; kapaliysa ""
 }
 
 func (o VhostOpts) SSL() bool {
@@ -802,6 +806,8 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		// modsec conf dosyasini da tazeler → tek kaynak: her render self-healing.
 		if !opts.Askida {
 			opts.ModSec = buildModSec(sk)
+			opts.IPKurallari = buildIPRules(sk)
+			opts.HotlinkLocation = buildHotlink(sk, opts.AlanAdi)
 		}
 		tmpl := vhostTmpl
 		if opts.Askida {

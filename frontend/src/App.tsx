@@ -44,6 +44,7 @@ import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
 import DomainWordPressPage from '@/pages/DomainWordPressPage'
 import DomainSubdomainlerPage from '@/pages/DomainSubdomainlerPage'
 import DomainEkAlanlarPage from '@/pages/DomainEkAlanlarPage'
+import DomainErisimKontrolPage from '@/pages/DomainErisimKontrolPage'
 import CPanelGirisPage from '@/pages/CPanelGirisPage'
 import IstatistiklerPage from '@/pages/IstatistiklerPage'
 import IzlemePage from '@/pages/IzlemePage'
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="abonelikler/:id/wordpress"     element={<DomainWordPressPage />} />
         <Route path="abonelikler/:id/subdomainler"  element={<DomainSubdomainlerPage />} />
         <Route path="abonelikler/:id/ek-alanlar"    element={<DomainEkAlanlarPage />} />
+        <Route path="abonelikler/:id/erisim-kontrol" element={<DomainErisimKontrolPage />} />
         <Route path="abonelikler/:id/cron"          element={<DomainCronPage />} />
         <Route path="abonelikler/:id/gunlukler"     element={<DomainLogsPage />} />
         <Route path="abonelikler/:id/dns"           element={<DomainDNSPage />} />
