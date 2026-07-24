@@ -5,6 +5,29 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
+import { api } from '@/lib/api'
+
+function panoYaz(text: string): boolean {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => {})
+    return true
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '0'
+    ta.style.left = '0'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    return true
+  } catch { return false }
+}
 
 export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; menuAcik?: boolean }) {
   const kullanici = useAuth((s) => s.kullanici)
@@ -12,12 +35,27 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const navigate = useNavigate()
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())
+  const [sunucuIp, setSunucuIp] = useState<string | null>(null)
+  const [ipKopyalandi, setIpKopyalandi] = useState(false)
 
   useEffect(() => {
     const h = (e: Event) => setTema((e as CustomEvent<Theme>).detail)
     window.addEventListener('sanal:theme-change', h)
     return () => window.removeEventListener('sanal:theme-change', h)
   }, [])
+
+  useEffect(() => {
+    api.get<{ sunucu_ip: string }>('/system/panel-domain')
+      .then(r => setSunucuIp(r.data.sunucu_ip || null))
+      .catch(() => {})
+  }, [])
+
+  function ipKopyala() {
+    if (!sunucuIp) return
+    panoYaz(sunucuIp)
+    setIpKopyalandi(true)
+    setTimeout(() => setIpKopyalandi(false), 1800)
+  }
 
   function temaDegistir() {
     const siradaki: Theme = tema === 'light' ? 'dark' : tema === 'dark' ? 'system' : 'light'
@@ -63,6 +101,22 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       </div>
 
       <div className="flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1">
+        {sunucuIp && (
+          <button
+            onClick={ipKopyala}
+            title="Tıkla → kopyala"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-mono text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+            </svg>
+            {ipKopyalandi ? (
+              <span className="text-emerald-600 dark:text-emerald-400 font-sans font-medium">✓ Kopyalandı</span>
+            ) : (
+              <span>{sunucuIp}</span>
+            )}
+          </button>
+        )}
         <button onClick={temaDegistir}
           className="p-2 text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-400 dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-slate-800 rounded-md transition"
           title={`Tema: ${tema} — tıkla değiştir`}>
