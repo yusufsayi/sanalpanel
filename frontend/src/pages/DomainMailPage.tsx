@@ -6,12 +6,14 @@ import Breadcrumb from '@/components/Breadcrumb'
 type Domain = { id: number; alan_adi: string }
 type Mailbox = { id: number; local_part: string; email: string; status: string; created_at: string }
 type Durum = { etkin: boolean; dkim_selector?: string }
+type Alias = { id: number; source: string; destination: string; catch_all: boolean; status: string; created_at: string }
 
 export default function DomainMailPage() {
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [durum, setDurum] = useState<Durum | null>(null)
   const [liste, setListe] = useState<Mailbox[]>([])
+  const [aliasListe, setAliasListe] = useState<Alias[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
@@ -19,6 +21,10 @@ export default function DomainMailPage() {
   const [parola, setParola] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
   const [yeniPw, setYeniPw] = useState<{ email: string; parola: string } | null>(null)
+  const [aliasKaynak, setAliasKaynak] = useState('')
+  const [aliasCatchAll, setAliasCatchAll] = useState(false)
+  const [aliasHedef, setAliasHedef] = useState('')
+  const [aliasIsleniyor, setAliasIsleniyor] = useState(false)
 
   function yukle() {
     if (!id) return
@@ -26,8 +32,9 @@ export default function DomainMailPage() {
     Promise.all([
       api.get<Durum>(`/domains/${id}/mail/durum`),
       api.get<Mailbox[]>(`/domains/${id}/mail`),
+      api.get<Alias[]>(`/domains/${id}/mail/aliases`),
     ])
-      .then(([d, m]) => { setDurum(d.data); setListe(m.data || []) })
+      .then(([d, m, a]) => { setDurum(d.data); setListe(m.data || []); setAliasListe(a.data || []) })
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
   }
@@ -84,6 +91,45 @@ export default function DomainMailPage() {
       setYeniPw({ email: k.email, parola: data.parola })
     } catch (e) {
       setHata(apiHata(e, 'Parola sıfırlanamadı'))
+    }
+  }
+
+  async function aliasEkle(e: React.FormEvent) {
+    e.preventDefault()
+    setHata(null); setOk(null); setAliasIsleniyor(true)
+    try {
+      await api.post(`/domains/${id}/mail/aliases`, {
+        local_part: aliasCatchAll ? '' : aliasKaynak,
+        destination: aliasHedef,
+      })
+      setAliasKaynak(''); setAliasHedef(''); setAliasCatchAll(false)
+      setOk('Yönlendirme eklendi.')
+      yukle()
+    } catch (e2) {
+      setHata(apiHata(e2, 'Yönlendirme eklenemedi'))
+    } finally {
+      setAliasIsleniyor(false)
+    }
+  }
+
+  async function aliasSil(a: Alias) {
+    if (!confirm(`"${a.source}" yönlendirmesini silmek istediğinize emin misiniz?`)) return
+    setHata(null); setOk(null)
+    try {
+      await api.delete(`/domains/${id}/mail/aliases/${a.id}`)
+      yukle()
+    } catch (e) {
+      setHata(apiHata(e, 'Silinemedi'))
+    }
+  }
+
+  async function aliasDurumDegistir(a: Alias) {
+    setHata(null); setOk(null)
+    try {
+      await api.post(`/domains/${id}/mail/aliases/${a.id}/durum`, { status: a.status === 'active' ? 'suspended' : 'active' })
+      yukle()
+    } catch (e) {
+      setHata(apiHata(e, 'Durum değiştirilemedi'))
     }
   }
 
@@ -162,6 +208,67 @@ export default function DomainMailPage() {
                       <div className="flex items-center gap-3">
                         <button onClick={() => parolaSifirla(k)} className="text-xs text-slate-600 dark:text-slate-300 hover:underline">Parola sıfırla</button>
                         <button onClick={() => sil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm mt-5">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Yönlendirmeler (Forwarder) &amp; Catch-All</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                Gelen postayı bir kutu oluşturmadan başka adres(ler)e yönlendirir. "Bu domaine gelen tüm postayı yönlendir" seçilirse, tanımlı kutusu olmayan her adrese gelen mail bu hedefe gider (catch-all).
+              </p>
+              <form onSubmit={aliasEkle} className="mb-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  {aliasCatchAll ? (
+                    <span className="flex-1 px-3 py-2 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-500 dark:text-slate-400 font-mono">*@{domain?.alan_adi}</span>
+                  ) : (
+                    <>
+                      <input value={aliasKaynak} onChange={e => setAliasKaynak(e.target.value)} required={!aliasCatchAll} placeholder="destek"
+                        className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                      <span className="text-slate-500 dark:text-slate-400 text-sm">@{domain?.alan_adi}</span>
+                    </>
+                  )}
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <input type="checkbox" checked={aliasCatchAll} onChange={e => setAliasCatchAll(e.target.checked)} />
+                  Bu domaine gelen tüm postayı yönlendir (catch-all)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input value={aliasHedef} onChange={e => setAliasHedef(e.target.value)} required placeholder="hedef1@ornek.com, hedef2@ornek.com"
+                    className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                  <button disabled={aliasIsleniyor || !aliasHedef || (!aliasCatchAll && !aliasKaynak)}
+                    className="px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+                    {aliasIsleniyor ? 'Ekleniyor…' : 'Ekle'}
+                  </button>
+                </div>
+              </form>
+
+              {aliasListe.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Henüz yönlendirme yok.</p>
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                  {aliasListe.map(a => (
+                    <li key={a.id} className="flex items-center justify-between py-2.5">
+                      <div>
+                        <span className="text-sm font-mono text-slate-800 dark:text-slate-200">
+                          {a.catch_all ? `*@${domain?.alan_adi}` : a.source}
+                        </span>
+                        <span className="mx-1.5 text-slate-400">→</span>
+                        <span className="text-sm font-mono text-slate-600 dark:text-slate-400">{a.destination}</span>
+                        {a.status !== 'active' && (
+                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">askıda</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => aliasDurumDegistir(a)} className="text-xs text-slate-600 dark:text-slate-300 hover:underline">
+                          {a.status === 'active' ? 'Askıya al' : 'Etkinleştir'}
+                        </button>
+                        <button onClick={() => aliasSil(a)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
                       </div>
                     </li>
                   ))}
