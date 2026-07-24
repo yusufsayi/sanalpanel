@@ -112,7 +112,22 @@ else ok "wp-cli (mevcut)"; fi
 step "4) MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1; sleep 2
 systemctl is-active --quiet mariadb || die "MariaDB başlamadı"
-DBPASS=$(openssl rand -hex 16)
+# İdempotent re-run: /etc/sanalpanel/env zaten varsa mevcut sırları (DB parolası,
+# JWT secret, redis admin parolası) KORU, yeniden üretme. Aksi halde her re-run
+# MariaDB'deki panel parolasını değiştirir ama HALİHAZIRDA ÇALIŞAN panel süreci
+# restart olmadan bunu öğrenemez (env dosyasını sadece açılışta okur) — mevcut DB
+# bağlantıları idle timeout'ta düşünce yeni bağlantılar "Access denied" ile
+# başarısız olur; bu da login dahil TÜM sorguları bozar (2FA kontrolü fail-closed
+# olduğundan hata "2FA durumu doğrulanamadı" gibi yanıltıcı görünür — gerçek sebep
+# parola uyuşmazlığıdır).
+if [ -s /etc/sanalpanel/env ]; then
+  DBPASS=$(sed -n 's/^PANEL_DB_DSN=panel:\([^@]*\)@.*/\1/p' /etc/sanalpanel/env)
+  JWT=$(sed -n 's/^PANEL_JWT_SECRET=//p' /etc/sanalpanel/env)
+  RADMIN=$(sed -n 's/^PANEL_REDIS_ADMIN_PASS=//p' /etc/sanalpanel/env)
+fi
+[ -n "${DBPASS:-}" ] || DBPASS=$(openssl rand -hex 16)
+[ -n "${JWT:-}" ]    || JWT=$(openssl rand -hex 32)
+[ -n "${RADMIN:-}" ] || RADMIN=$(openssl rand -hex 24)
 mysql -u root <<SQL
 CREATE DATABASE IF NOT EXISTS panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'panel'@'127.0.0.1' IDENTIFIED BY '$DBPASS';
@@ -127,7 +142,6 @@ step "5) Dizinler + env"
 mkdir -p /opt/sanalpanel/bin /opt/sanalpanel/frontend-dist /opt/sanalpanel/src/migrations \
          /opt/sanalpanel/src/mail-templates /opt/sanalpanel/src/scripts /opt/sanalpanel/pma-signon \
          /etc/sanalpanel /etc/ssl/sanalpanel
-JWT=$(openssl rand -hex 32); RADMIN=$(openssl rand -hex 24)
 cat > /etc/sanalpanel/env <<ENV
 PANEL_LISTEN=127.0.0.1:8080
 PANEL_ENV=production
@@ -137,7 +151,7 @@ PANEL_JWT_LIFETIME_SEC=43200
 PANEL_REDIS_ADMIN_PASS=${RADMIN}
 ENV
 chmod 600 /etc/sanalpanel/env
-ok "/etc/sanalpanel/env (JWT + DB DSN + Redis admin üretildi)"
+ok "/etc/sanalpanel/env (JWT + DB DSN + Redis admin — mevcutsa korundu, yoksa üretildi)"
 
 # ============ 6) ARTIFACT DEPLOY ============
 step "6) Panel binary + frontend + migration"
